@@ -11,19 +11,27 @@ import 'services/notification_service.dart';
 import 'router/app_router.dart';
 import 'utils/app_theme.dart';
 
+/// Replace this stub with the generated firebase_options.dart:
+///   Run: flutterfire configure
+/// Then import and pass DefaultFirebaseOptions.currentPlatform below.
+///
+/// For now Firebase is initialized without explicit options, which works
+/// when google-services.json (Android) / GoogleService-Info.plist (iOS)
+/// are present at build time.
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock to portrait orientation
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
 
-  // Initialize Firebase
+  // Initialize Firebase (picks up google-services.json / GoogleService-Info.plist).
+  // If you have firebase_options.dart from flutterfire configure, pass:
+  //   options: DefaultFirebaseOptions.currentPlatform
   await Firebase.initializeApp();
 
-  // Initialize notifications
   await NotificationService.instance.initialize();
 
   runApp(const MernG11App());

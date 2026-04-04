@@ -3,12 +3,13 @@ import '../models/project_model.dart';
 import '../models/task_model.dart';
 import '../models/note_model.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../utils/constants.dart';
 
 class ProjectProvider extends ChangeNotifier {
   List<ProjectModel> _projects = [];
-  Map<String, List<TaskModel>> _tasksByProject = {};
-  Map<String, List<NoteModel>> _notesByParent = {};
+  final Map<String, List<TaskModel>> _tasksByProject = {};
+  final Map<String, List<NoteModel>> _notesByParent = {};
   bool _isLoading = false;
   String? _error;
 
@@ -22,14 +23,24 @@ class ProjectProvider extends ChangeNotifier {
   List<NoteModel> notesForParent(String parentId) =>
       _notesByParent[parentId] ?? [];
 
+  // ── Projects ──────────────────────────────────────────────────
+
   Future<void> fetchProjects() async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      final response = await ApiService.instance.get(ApiConstants.fetchManyProjects);
-      final list = response['projects'] as List? ?? response as List? ?? [];
+      final info = await AuthService.instance.getUserInfo();
+      final userId = info['userId'] ?? '';
+
+      // GET /projects/fetch/many with body {id: userId}
+      final data = await ApiService.instance.getWithBody(
+        ApiConstants.fetchManyProjects,
+        body: {'id': userId},
+      );
+
+      final list = _asList(data);
       _projects = list
           .map((e) => ProjectModel.fromJson(e as Map<String, dynamic>))
           .toList();
@@ -48,11 +59,16 @@ class ProjectProvider extends ChangeNotifier {
     required String description,
   }) async {
     try {
-      final response = await ApiService.instance.post(
+      final info = await AuthService.instance.getUserInfo();
+      final userId = info['userId'] ?? '';
+
+      // POST /projects/create {title, description, id: userId}
+      final data = await ApiService.instance.post(
         ApiConstants.createProject,
-        body: {'title': title, 'description': description},
+        body: {'title': title, 'description': description, 'id': userId},
       );
-      final project = ProjectModel.fromJson(response['project'] ?? response);
+
+      final project = ProjectModel.fromJson(data as Map<String, dynamic>);
       _projects.insert(0, project);
       notifyListeners();
       return project;
@@ -63,20 +79,21 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> updateProject(String id, {String? title, String? description}) async {
+  Future<bool> updateProject(String id,
+      {String? title, String? description}) async {
     try {
-      final body = <String, dynamic>{'id': id};
-      if (title != null) body['title'] = title;
-      if (description != null) body['description'] = description;
+      final update = <String, dynamic>{};
+      if (title != null) update['title'] = title;
+      if (description != null) update['description'] = description;
 
-      await ApiService.instance.put(ApiConstants.updateProject, body: body);
+      // PUT /projects/update {id, update:{…}}
+      await ApiService.instance
+          .put(ApiConstants.updateProject, body: {'id': id, 'update': update});
 
       final index = _projects.indexWhere((p) => p.id == id);
       if (index != -1) {
-        _projects[index] = _projects[index].copyWith(
-          title: title,
-          description: description,
-        );
+        _projects[index] =
+            _projects[index].copyWith(title: title, description: description);
         notifyListeners();
       }
       return true;
@@ -89,7 +106,8 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<bool> deleteProject(String id) async {
     try {
-      await ApiService.instance.delete(ApiConstants.deleteProject, body: {'id': id});
+      await ApiService.instance
+          .delete(ApiConstants.deleteProject, body: {'id': id});
       _projects.removeWhere((p) => p.id == id);
       _tasksByProject.remove(id);
       notifyListeners();
@@ -101,13 +119,15 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
+  // ── Tasks ─────────────────────────────────────────────────────
+
   Future<void> fetchTasks(String projectId) async {
     try {
-      final response = await ApiService.instance.get(
+      final data = await ApiService.instance.getWithBody(
         ApiConstants.fetchManyTasks,
-        queryParams: {'projectId': projectId},
+        body: {'projectId': projectId},
       );
-      final list = response['tasks'] as List? ?? response as List? ?? [];
+      final list = _asList(data);
       _tasksByProject[projectId] = list
           .map((e) => TaskModel.fromJson(e as Map<String, dynamic>))
           .toList();
@@ -121,12 +141,15 @@ class ProjectProvider extends ChangeNotifier {
     required String description,
   }) async {
     try {
-      final response = await ApiService.instance.post(
+      final data = await ApiService.instance.post(
         ApiConstants.createTask,
         body: {'projectId': projectId, 'name': name, 'description': description},
       );
-      final task = TaskModel.fromJson(response['task'] ?? response);
-      _tasksByProject[projectId] = [task, ...(_tasksByProject[projectId] ?? [])];
+      final task = TaskModel.fromJson(data as Map<String, dynamic>);
+      _tasksByProject[projectId] = [
+        task,
+        ...(_tasksByProject[projectId] ?? [])
+      ];
       notifyListeners();
       return task;
     } on ApiException catch (e) {
@@ -136,18 +159,20 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> updateTask(String taskId, String projectId, {String? name, String? description}) async {
+  Future<bool> updateTask(String taskId, String projectId,
+      {String? name, String? description}) async {
     try {
-      final body = <String, dynamic>{'id': taskId};
-      if (name != null) body['name'] = name;
-      if (description != null) body['description'] = description;
+      final update = <String, dynamic>{};
+      if (name != null) update['name'] = name;
+      if (description != null) update['description'] = description;
 
-      await ApiService.instance.put(ApiConstants.updateTask, body: body);
+      await ApiService.instance
+          .put(ApiConstants.updateTask, body: {'id': taskId, 'update': update});
 
       final tasks = _tasksByProject[projectId] ?? [];
-      final index = tasks.indexWhere((t) => t.id == taskId);
-      if (index != -1) {
-        tasks[index] = tasks[index].copyWith(name: name, description: description);
+      final i = tasks.indexWhere((t) => t.id == taskId);
+      if (i != -1) {
+        tasks[i] = tasks[i].copyWith(name: name, description: description);
         _tasksByProject[projectId] = tasks;
         notifyListeners();
       }
@@ -161,7 +186,8 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<bool> deleteTask(String taskId, String projectId) async {
     try {
-      await ApiService.instance.delete(ApiConstants.deleteTask, body: {'id': taskId});
+      await ApiService.instance
+          .delete(ApiConstants.deleteTask, body: {'id': taskId});
       _tasksByProject[projectId]?.removeWhere((t) => t.id == taskId);
       notifyListeners();
       return true;
@@ -172,13 +198,15 @@ class ProjectProvider extends ChangeNotifier {
     }
   }
 
+  // ── Notes ─────────────────────────────────────────────────────
+
   Future<void> fetchNotes(String parentId, String parentType) async {
     try {
-      final response = await ApiService.instance.get(
+      final data = await ApiService.instance.getWithBody(
         ApiConstants.fetchManyNotes,
-        queryParams: {'parentId': parentId, 'parentType': parentType},
+        body: {'parentId': parentId, 'parentType': parentType},
       );
-      final list = response['notes'] as List? ?? response as List? ?? [];
+      final list = _asList(data);
       _notesByParent[parentId] = list
           .map((e) => NoteModel.fromJson(e as Map<String, dynamic>))
           .toList();
@@ -192,11 +220,15 @@ class ProjectProvider extends ChangeNotifier {
     required String parentType,
   }) async {
     try {
-      final response = await ApiService.instance.post(
+      final data = await ApiService.instance.post(
         ApiConstants.createNote,
-        body: {'content': content, 'parentId': parentId, 'parentType': parentType},
+        body: {
+          'content': content,
+          'parentId': parentId,
+          'parentType': parentType
+        },
       );
-      final note = NoteModel.fromJson(response['note'] ?? response);
+      final note = NoteModel.fromJson(data as Map<String, dynamic>);
       _notesByParent[parentId] = [note, ...(_notesByParent[parentId] ?? [])];
       notifyListeners();
       return note;
@@ -209,7 +241,8 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<bool> deleteNote(String noteId, String parentId) async {
     try {
-      await ApiService.instance.delete(ApiConstants.deleteNote, body: {'id': noteId});
+      await ApiService.instance
+          .delete(ApiConstants.deleteNote, body: {'id': noteId});
       _notesByParent[parentId]?.removeWhere((n) => n.id == noteId);
       notifyListeners();
       return true;
@@ -223,5 +256,16 @@ class ProjectProvider extends ChangeNotifier {
   void clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  List _asList(dynamic data) {
+    if (data is List) return data;
+    if (data is Map) {
+      // Sometimes wrapped in another key
+      for (final key in ['projects', 'tasks', 'notes', 'sessions']) {
+        if (data[key] is List) return data[key] as List;
+      }
+    }
+    return [];
   }
 }

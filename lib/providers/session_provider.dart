@@ -32,31 +32,26 @@ class SessionProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final queryParams = <String, String>{};
-      if (projectId != null) queryParams['projectId'] = projectId;
+      final body = <String, dynamic>{};
+      if (projectId != null) body['projectId'] = projectId;
 
-      final response = await ApiService.instance.get(
-        ApiConstants.fetchManySession,
-        queryParams: queryParams.isNotEmpty ? queryParams : null,
+      // GET /sessions/fetch/many with req.body
+      final data = await ApiService.instance.getWithBody(
+        ApiConstants.fetchManySessions,
+        body: body,
       );
-      final list = response['sessions'] as List? ?? response as List? ?? [];
-      _sessions = list
+
+      final list = data is List ? data : (data is Map ? (data['sessions'] ?? []) : []);
+      _sessions = (list as List)
           .map((e) => SessionModel.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      // Check for active session
-      _activeSession = _sessions.firstWhere(
-        (s) => s.isActive,
-        orElse: () => SessionModel(
-          id: '',
-          projectId: '',
-          startTime: DateTime.now(),
-        ),
-      );
-      if (_activeSession!.id.isEmpty) _activeSession = null;
-
-      if (_activeSession != null) {
-        _startTimer();
+      // Identify active session
+      try {
+        _activeSession = _sessions.firstWhere((s) => s.isActive);
+        if (_activeSession != null) _startTimer();
+      } catch (_) {
+        _activeSession = null;
       }
     } on ApiException catch (e) {
       _error = e.message;
@@ -68,16 +63,41 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
+  /// Also fetches current status from the server (active session state).
+  Future<void> fetchStatus() async {
+    try {
+      final data = await ApiService.instance.get(ApiConstants.sessionStatus);
+      if (data is Map && data['session'] != null) {
+        _activeSession = SessionModel.fromJson(data['session'] as Map<String, dynamic>);
+        _startTimer();
+        notifyListeners();
+      } else {
+        _activeSession = null;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  /// POST /sessions/create {projectId}
   Future<SessionModel?> startSession(String projectId, {String? projectTitle}) async {
     try {
-      final response = await ApiService.instance.post(
+      final data = await ApiService.instance.post(
         ApiConstants.createSession,
         body: {'projectId': projectId},
       );
-      final session = SessionModel.fromJson(response['session'] ?? response);
+
+      final session = SessionModel.fromJson(data as Map<String, dynamic>);
       _activeSession = session;
       _activeProjectTitle = projectTitle;
-      _sessions.insert(0, session);
+
+      // Insert or update in list
+      final idx = _sessions.indexWhere((s) => s.id == session.id);
+      if (idx == -1) {
+        _sessions.insert(0, session);
+      } else {
+        _sessions[idx] = session;
+      }
+
       _startTimer();
       notifyListeners();
       return session;
@@ -88,22 +108,23 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
-  Future<SessionModel?> stopSession(String sessionId) async {
+  /// GET /sessions/stop
+  Future<SessionModel?> stopSession() async {
     try {
-      final response = await ApiService.instance.post(
-        ApiConstants.stopSession,
-        body: {'id': sessionId},
-      );
-      final updated = SessionModel.fromJson(response['session'] ?? response);
+      final data = await ApiService.instance.get(ApiConstants.stopSession);
+      final updated = SessionModel.fromJson(data as Map<String, dynamic>);
 
-      final index = _sessions.indexWhere((s) => s.id == sessionId);
-      if (index != -1) _sessions[index] = updated;
+      final idx = _sessions.indexWhere((s) => s.id == updated.id);
+      if (idx != -1) {
+        _sessions[idx] = updated;
+      } else {
+        _sessions.insert(0, updated);
+      }
 
       _activeSession = null;
       _activeProjectTitle = null;
       _sessionTimer?.cancel();
       _sessionTimer = null;
-
       await NotificationService.instance.cancelAllNotifications();
       notifyListeners();
       return updated;
@@ -114,9 +135,41 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
+  /// GET /sessions/pause
+  Future<void> pauseSession() async {
+    try {
+      final data = await ApiService.instance.get(ApiConstants.pauseSession);
+      if (data != null) {
+        final updated = SessionModel.fromJson(data as Map<String, dynamic>);
+        _activeSession = updated;
+        notifyListeners();
+      }
+    } on ApiException catch (e) {
+      _error = e.message;
+      notifyListeners();
+    }
+  }
+
+  /// GET /sessions/start (resume a paused session)
+  Future<void> resumeSession() async {
+    try {
+      final data = await ApiService.instance.get(ApiConstants.startSession);
+      if (data != null) {
+        final updated = SessionModel.fromJson(data as Map<String, dynamic>);
+        _activeSession = updated;
+        _startTimer();
+        notifyListeners();
+      }
+    } on ApiException catch (e) {
+      _error = e.message;
+      notifyListeners();
+    }
+  }
+
   Future<bool> deleteSession(String sessionId) async {
     try {
-      await ApiService.instance.delete(ApiConstants.deleteSession, body: {'id': sessionId});
+      await ApiService.instance
+          .delete(ApiConstants.deleteSession, body: {'id': sessionId});
       _sessions.removeWhere((s) => s.id == sessionId);
       if (_activeSession?.id == sessionId) {
         _activeSession = null;
@@ -135,13 +188,11 @@ class SessionProvider extends ChangeNotifier {
     _sessionTimer?.cancel();
     _sessionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_activeSession != null) {
-        final title = _activeProjectTitle ?? 'Project';
-        final duration = _activeSession!.formattedDuration;
         NotificationService.instance.showSessionReminder(
-          projectTitle: title,
-          duration: duration,
+          projectTitle: _activeProjectTitle ?? 'Project',
+          duration: _activeSession!.formattedDuration,
         );
-        notifyListeners(); // Refresh duration display
+        notifyListeners(); // Refresh elapsed display
       }
     });
   }
@@ -151,23 +202,17 @@ class SessionProvider extends ChangeNotifier {
 
   Map<String, Duration> get durationByProject {
     final map = <String, Duration>{};
-    for (final session in completedSessions) {
-      map[session.projectId] =
-          (map[session.projectId] ?? Duration.zero) + session.duration;
+    for (final s in completedSessions) {
+      map[s.projectId] = (map[s.projectId] ?? Duration.zero) + s.duration;
     }
     return map;
   }
 
-  /// Returns a map of date -> total duration for heatmap
   Map<DateTime, Duration> get dailyActivity {
     final map = <DateTime, Duration>{};
-    for (final session in completedSessions) {
-      final day = DateTime(
-        session.startTime.year,
-        session.startTime.month,
-        session.startTime.day,
-      );
-      map[day] = (map[day] ?? Duration.zero) + session.duration;
+    for (final s in completedSessions) {
+      final day = DateTime(s.startTime.year, s.startTime.month, s.startTime.day);
+      map[day] = (map[day] ?? Duration.zero) + s.duration;
     }
     return map;
   }

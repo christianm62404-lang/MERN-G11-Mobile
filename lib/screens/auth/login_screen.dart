@@ -35,6 +35,9 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     if (!success && mounted) {
+      // EMAIL_NOT_VERIFIED → router redirect handles navigation
+      if (auth.status == AuthStatus.unverified) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(auth.errorMessage ?? 'Login failed'),
@@ -59,32 +62,24 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 48),
-                // Logo / Branding
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: AppTheme.primaryColor.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: const Icon(
-                    Icons.track_changes,
-                    size: 40,
-                    color: AppTheme.primaryColor,
-                  ),
+                  child: const Icon(Icons.track_changes,
+                      size: 40, color: AppTheme.primaryColor),
                 ),
                 const SizedBox(height: 24),
-                Text(
-                  'Welcome back',
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                Text('Welcome back',
+                    style: theme.textTheme.headlineMedium
+                        ?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
                 Text(
                   'Sign in to your account to continue',
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.6),
-                  ),
+                      color: theme.colorScheme.onSurface.withOpacity(0.6)),
                 ),
                 const SizedBox(height: 40),
                 AppTextField(
@@ -94,9 +89,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   prefixIcon: Icons.email_outlined,
                   textInputAction: TextInputAction.next,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) return 'Email is required';
-                    if (!value.contains('@')) return 'Enter a valid email';
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Email is required';
+                    if (!v.contains('@')) return 'Enter a valid email';
                     return null;
                   },
                 ),
@@ -107,12 +102,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   obscureText: true,
                   prefixIcon: Icons.lock_outlined,
                   textInputAction: TextInputAction.done,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) return 'Password is required';
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Password is required';
                     return null;
                   },
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => context.go('/forgot-password'),
+                    child: const Text('Forgot password?'),
+                  ),
+                ),
+                const SizedBox(height: 16),
                 AppButton(
                   label: 'Sign In',
                   onPressed: _login,
@@ -123,10 +126,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        "Don't have an account? ",
-                        style: theme.textTheme.bodyMedium,
-                      ),
+                      Text("Don't have an account? ",
+                          style: theme.textTheme.bodyMedium),
                       TextButton(
                         onPressed: () => context.go('/register'),
                         child: const Text('Sign Up'),

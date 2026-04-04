@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:jwt_decoder/jwt_decoder.dart';
 import '../models/user_model.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -22,21 +23,31 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> _checkAuthState() async {
-    final isLoggedIn = await AuthService.instance.isLoggedIn();
-    if (isLoggedIn) {
-      final info = await AuthService.instance.getUserInfo();
-      _user = UserModel(
-        id: info['userId'] ?? '',
-        email: info['email'] ?? '',
-        firstName: info['firstName'] ?? '',
-        verified: true,
-        createdAt: DateTime.now(),
-      );
-      _status = AuthStatus.authenticated;
-    } else {
+    try {
+      final token = await AuthService.instance.getToken();
+      if (token != null && token.isNotEmpty && !JwtDecoder.isExpired(token)) {
+        _user = _userFromToken(token);
+        _status = AuthStatus.authenticated;
+      } else {
+        await AuthService.instance.logout();
+        _status = AuthStatus.unauthenticated;
+      }
+    } catch (_) {
       _status = AuthStatus.unauthenticated;
     }
     notifyListeners();
+  }
+
+  /// Decode JWT payload → UserModel (no extra API call needed).
+  UserModel _userFromToken(String token) {
+    final payload = JwtDecoder.decode(token);
+    return UserModel(
+      id: payload['userId']?.toString() ?? '',
+      email: payload['email']?.toString() ?? '',
+      firstName: payload['firstName']?.toString() ?? '',
+      verified: true,
+      createdAt: DateTime.now(),
+    );
   }
 
   Future<bool> login(String email, String password) async {
@@ -45,33 +56,36 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await ApiService.instance.post(
+      // Response is already unwrapped to `data` by ApiService → { token }
+      final data = await ApiService.instance.post(
         ApiConstants.loginUser,
         body: {'email': email, 'password': password},
         requireAuth: false,
-      );
+      ) as Map<String, dynamic>?;
 
-      final token = response['token'] as String?;
-      if (token == null) throw ApiException('No token received');
-
-      final userData = response['user'] as Map<String, dynamic>?;
-      if (userData != null) {
-        _user = UserModel.fromJson(userData);
-        await AuthService.instance.saveToken(token);
-        await AuthService.instance.saveUserInfo(
-          userId: _user!.id,
-          email: _user!.email,
-          firstName: _user!.firstName,
-        );
-        _status = AuthStatus.authenticated;
-        notifyListeners();
-        return true;
+      final token = data?['token'] as String?;
+      if (token == null || token.isEmpty) {
+        throw ApiException('No token received');
       }
 
-      throw ApiException('Invalid response from server');
+      await AuthService.instance.saveToken(token);
+      _user = _userFromToken(token);
+      await AuthService.instance.saveUserInfo(
+        userId: _user!.id,
+        email: _user!.email,
+        firstName: _user!.firstName,
+      );
+      _status = AuthStatus.authenticated;
+      notifyListeners();
+      return true;
     } on ApiException catch (e) {
+      // EMAIL_NOT_VERIFIED → redirect to verify screen
+      if (e.errorCode == 'EMAIL_NOT_VERIFIED') {
+        _status = AuthStatus.unverified;
+      } else {
+        _status = AuthStatus.unauthenticated;
+      }
       _errorMessage = e.message;
-      _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
     } catch (e) {
@@ -85,6 +99,7 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  /// Returns email so the caller can redirect to verify screen.
   Future<bool> register({
     required String email,
     required String password,
@@ -97,14 +112,10 @@ class AuthProvider extends ChangeNotifier {
     try {
       await ApiService.instance.post(
         ApiConstants.createUser,
-        body: {
-          'email': email,
-          'password': password,
-          'firstName': firstName,
-        },
+        body: {'email': email, 'password': password, 'firstName': firstName},
         requireAuth: false,
       );
-
+      // Registration succeeded — user needs to verify email before login.
       _status = AuthStatus.unverified;
       notifyListeners();
       return true;
@@ -126,11 +137,50 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
-
     try {
       await ApiService.instance.post(
         ApiConstants.regenVerification,
         body: {'email': email},
+        requireAuth: false,
+      );
+      return true;
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> requestPasswordReset(String email) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await ApiService.instance.post(
+        ApiConstants.resetPasswordRequest,
+        body: {'email': email},
+        requireAuth: false,
+      );
+      return true;
+    } on ApiException catch (e) {
+      _errorMessage = e.message;
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> resetPassword(String token, String newPassword) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      await ApiService.instance.post(
+        ApiConstants.resetPassword,
+        body: {'token': token, 'newPassword': newPassword},
         requireAuth: false,
       );
       return true;
@@ -153,6 +203,12 @@ class AuthProvider extends ChangeNotifier {
 
   void clearError() {
     _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// Called when user arrives at unverified state from login screen
+  void setUnverified() {
+    _status = AuthStatus.unverified;
     notifyListeners();
   }
 }
