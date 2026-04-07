@@ -136,7 +136,7 @@ class _SummarySection extends StatelessWidget {
             _InsightCard(title: 'Total Time', value: _fmt(totalTime), icon: Icons.schedule_outlined, color: AppTheme.primaryColor),
             _InsightCard(title: 'This Week', value: _fmt(weekTime), icon: Icons.date_range_outlined, color: AppTheme.secondaryColor),
             _InsightCard(title: 'Sessions', value: '${completed.length}', icon: Icons.timer_outlined, color: AppTheme.warningColor),
-            _InsightCard(title: 'Avg Session', value: _fmt(avgDuration), icon: Icons.avg_pace_outlined, color: AppTheme.primaryDark),
+            _InsightCard(title: 'Avg Session', value: _fmt(avgDuration), icon: Icons.timelapse_outlined, color: AppTheme.primaryDark),
           ],
         ),
       ],
