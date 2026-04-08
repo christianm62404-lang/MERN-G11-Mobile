@@ -12,6 +12,8 @@ import '../screens/projects/projects_screen.dart';
 import '../screens/projects/project_detail_screen.dart';
 import '../screens/sessions/sessions_screen.dart';
 import '../screens/insights/insights_screen.dart';
+import '../screens/insights/insight_project_screen.dart';
+import '../screens/insights/insight_session_screen.dart';
 import '../screens/account/account_screen.dart';
 import '../widgets/main_shell.dart';
 
@@ -104,6 +106,22 @@ class AppRouter {
             GoRoute(
               path: '/insights',
               builder: (_, __) => const InsightsScreen(),
+            ),
+            GoRoute(
+              path: '/insights/project/:id',
+              builder: (context, state) => InsightProjectScreen(
+                projectId: state.pathParameters['id']!,
+                projectTitle:
+                    state.uri.queryParameters['title'] ?? 'Project',
+              ),
+            ),
+            GoRoute(
+              path: '/insights/session/:id',
+              builder: (context, state) => InsightSessionScreen(
+                sessionId: state.pathParameters['id']!,
+                projectTitle:
+                    state.uri.queryParameters['projectTitle'] ?? 'Session',
+              ),
             ),
             GoRoute(
               path: '/account',

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "76285506073",
+    "project_id": "merng11mobile",
+    "storage_bucket": "merng11mobile.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:76285506073:android:3c4acc851b20de30c1b088",
+        "android_client_info": {
+          "package_name": "com.mern.g11mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB84FF77-sETIP8IMbzxdQLZYVyPDU-aVQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
