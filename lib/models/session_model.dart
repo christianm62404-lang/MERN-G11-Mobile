@@ -4,6 +4,7 @@ class SessionModel {
   final DateTime startTime;
   final DateTime? endTime;
   final int? durationSeconds;
+  final List<String> taskIds;
 
   SessionModel({
     required this.id,
@@ -11,6 +12,7 @@ class SessionModel {
     required this.startTime,
     this.endTime,
     this.durationSeconds,
+    this.taskIds = const [],
   });
 
   bool get isActive => endTime == null;
@@ -37,6 +39,10 @@ class SessionModel {
   }
 
   factory SessionModel.fromJson(Map<String, dynamic> json) {
+    final rawTasks = json['taskIds'];
+    final tasks = rawTasks is List
+        ? rawTasks.map((e) => e.toString()).toList()
+        : <String>[];
     return SessionModel(
       id: json['_id'] ?? json['id'] ?? '',
       projectId: json['projectId'] ?? '',
@@ -47,6 +53,18 @@ class SessionModel {
           ? DateTime.tryParse(json['endTime'])
           : null,
       durationSeconds: json['duration'],
+      taskIds: tasks,
+    );
+  }
+
+  SessionModel copyWith({List<String>? taskIds}) {
+    return SessionModel(
+      id: id,
+      projectId: projectId,
+      startTime: startTime,
+      endTime: endTime,
+      durationSeconds: durationSeconds,
+      taskIds: taskIds ?? this.taskIds,
     );
   }
 
@@ -57,6 +75,7 @@ class SessionModel {
       'startTime': startTime.toIso8601String(),
       if (endTime != null) 'endTime': endTime!.toIso8601String(),
       if (durationSeconds != null) 'duration': durationSeconds,
+      'taskIds': taskIds,
     };
   }
 }
