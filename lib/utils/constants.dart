@@ -3,7 +3,9 @@ class ApiConstants {
   // Android emulator → local machine: http://10.0.2.2:5000/api
   // iOS simulator → local machine:    http://127.0.0.1:5000/api
   // Physical device → your LAN IP:    http://192.168.x.x:5000/api
-  static const String baseUrl = 'http://10.0.2.2:5050/api';
+  // Android emulator → 10.0.2.2:5050
+  // iPhone / physical device → Mac's LAN IP:5050
+  static const String baseUrl = 'http://10.37.32.207:5050/api';
 
   // ── Users ──────────────────────────────────────────────────────
   static const String createUser             = '/users/create';
