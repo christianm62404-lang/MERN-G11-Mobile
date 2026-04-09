@@ -3,6 +3,14 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'auth_service.dart';
+// Add this import at the top:
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+// Add this as the first line inside initialize():
+Future<void> initialize() async {
+  if (kIsWeb) return;   // ← add this line
+  // ... rest of existing code ...
+
 
 // Background message handler — must be top-level function
 @pragma('vm:entry-point')
