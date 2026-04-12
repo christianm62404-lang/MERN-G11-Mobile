@@ -162,9 +162,9 @@ class _ProjectTile extends StatelessWidget {
 
     return Card(
       child: InkWell(
-        onTap: () => context.go(
-          '/projects/${project.id}?title=${Uri.encodeComponent(project.title)}',
-        ),
+        onTap: () => context.push(
+       '/projects/${project.id}?title=${Uri.encodeComponent(project.title)}',
+      ),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
