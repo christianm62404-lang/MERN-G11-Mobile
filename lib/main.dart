@@ -17,12 +17,19 @@ void main() async {
 
   if (!kIsWeb) {
     await SystemChrome.setPreferredOrientations([
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ));
+
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
   }
 
-  // Firebase is mobile-only — skip on web to allow Chrome testing.
   if (!kIsWeb) {
     await Firebase.initializeApp();
     await NotificationService.instance.initialize();

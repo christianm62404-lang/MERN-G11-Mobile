@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/session_model.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
 
@@ -32,10 +33,10 @@ class SessionProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final body = <String, dynamic>{};
+      final info = await AuthService.instance.getUserInfo();
+      final body = <String, dynamic>{'userId': info['userId'] ?? ''};
       if (projectId != null) body['projectId'] = projectId;
 
-      // GET /sessions/fetch/many with req.body
       final data = await ApiService.instance.getWithBody(
         ApiConstants.fetchManySessions,
         body: body,
@@ -46,7 +47,6 @@ class SessionProvider extends ChangeNotifier {
           .map((e) => SessionModel.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      // Identify active session
       try {
         _activeSession = _sessions.firstWhere((s) => s.isActive);
         if (_activeSession != null) _startTimer();
@@ -78,19 +78,30 @@ class SessionProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// POST /sessions/create {projectId}
+  /// POST /sessions/create {projectId, userId}
   Future<SessionModel?> startSession(String projectId, {String? projectTitle}) async {
     try {
+      final info = await AuthService.instance.getUserInfo();
+      final userId = info['userId'] ?? '';
+
       final data = await ApiService.instance.post(
         ApiConstants.createSession,
-        body: {'projectId': projectId},
+        body: {'projectId': projectId, 'userId': userId},
       );
 
-      final session = SessionModel.fromJson(data as Map<String, dynamic>);
+      // Backend returns full session doc; fall back to building locally if needed
+      final map = data as Map<String, dynamic>?;
+      final session = (map != null && map['projectId'] != null)
+          ? SessionModel.fromJson(map)
+          : SessionModel(
+              id: map?['insertedId']?.toString() ?? map?['_id']?.toString() ?? '',
+              projectId: projectId,
+              startTime: DateTime.now(),
+            );
+
       _activeSession = session;
       _activeProjectTitle = projectTitle;
 
-      // Insert or update in list
       final idx = _sessions.indexWhere((s) => s.id == session.id);
       if (idx == -1) {
         _sessions.insert(0, session);
@@ -108,11 +119,23 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
-  /// GET /sessions/stop
+  /// POST /sessions/stop {id}
   Future<SessionModel?> stopSession() async {
+    if (_activeSession == null) return null;
     try {
-      final data = await ApiService.instance.get(ApiConstants.stopSession);
-      final updated = SessionModel.fromJson(data as Map<String, dynamic>);
+      await ApiService.instance.post(
+        ApiConstants.stopSession,
+        body: {'id': _activeSession!.id},
+      );
+
+      // Backend returns updateOne result, not the doc — build locally
+      final updated = SessionModel(
+        id: _activeSession!.id,
+        projectId: _activeSession!.projectId,
+        startTime: _activeSession!.startTime,
+        endTime: DateTime.now(),
+        taskIds: _activeSession!.taskIds,
+      );
 
       final idx = _sessions.indexWhere((s) => s.id == updated.id);
       if (idx != -1) {
@@ -192,7 +215,7 @@ class SessionProvider extends ChangeNotifier {
           projectTitle: _activeProjectTitle ?? 'Project',
           duration: _activeSession!.formattedDuration,
         );
-        notifyListeners(); // Refresh elapsed display
+        notifyListeners();
       }
     });
   }
