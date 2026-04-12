@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../providers/session_provider.dart';
 import '../../providers/project_provider.dart';
@@ -57,6 +58,8 @@ class _InsightsScreenState extends State<InsightsScreen> {
                       ),
                       const SizedBox(height: 12),
                       _TimeByProjectChart(sessions: sessions, projects: projects),
+                      const SizedBox(height: 12),
+                      _ProjectBreakdownList(sessions: sessions, projects: projects),
                       const SizedBox(height: 24),
 
                       // Activity heatmap
@@ -480,6 +483,123 @@ class _WeeklyTrendChart extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ProjectBreakdownList extends StatelessWidget {
+  final SessionProvider sessions;
+  final ProjectProvider projects;
+  const _ProjectBreakdownList({required this.sessions, required this.projects});
+
+  String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final byProject = sessions.durationByProject;
+    if (byProject.isEmpty) return const SizedBox.shrink();
+
+    final sorted = byProject.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final total = sorted.fold<int>(0, (a, b) => a + b.value.inMinutes);
+
+    String projectName(String id) {
+      try {
+        return projects.projects.firstWhere((p) => p.id == id).title;
+      } catch (_) {
+        return 'Unknown';
+      }
+    }
+
+    final colors = [
+      AppTheme.primaryColor,
+      AppTheme.secondaryColor,
+      AppTheme.warningColor,
+      AppTheme.primaryDark,
+      Colors.purple,
+    ];
+
+    return Column(
+      children: sorted.asMap().entries.take(5).map((e) {
+        final projectId = e.value.key;
+        final dur = e.value.value;
+        final pct = total > 0 ? dur.inMinutes / total : 0.0;
+        final color = colors[e.key % colors.length];
+        final name = projectName(projectId);
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => context.push(
+              Uri(
+                path: '/insights/project/$projectId',
+                queryParameters: {'title': name},
+              ).toString(),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                        color: color, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name,
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 4),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: pct,
+                            minHeight: 4,
+                            backgroundColor:
+                                theme.colorScheme.onSurface.withOpacity(0.08),
+                            valueColor: AlwaysStoppedAnimation<Color>(color),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(_fmt(dur),
+                          style: theme.textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      Text('${(pct * 100).toStringAsFixed(0)}%',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurface
+                                  .withOpacity(0.5))),
+                    ],
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.chevron_right,
+                      size: 18,
+                      color: theme.colorScheme.onSurface.withOpacity(0.3)),
+                ],
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }

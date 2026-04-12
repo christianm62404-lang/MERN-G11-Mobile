@@ -189,6 +189,48 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> addTaskToSession(String taskId) async {
+    if (_activeSession == null) return false;
+    try {
+      await ApiService.instance.post(
+        ApiConstants.addTaskToSession,
+        body: {'taskId': taskId},
+      );
+      final updated = _activeSession!.copyWith(
+          taskIds: [..._activeSession!.taskIds, taskId]);
+      _activeSession = updated;
+      final idx = _sessions.indexWhere((s) => s.id == updated.id);
+      if (idx != -1) _sessions[idx] = updated;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _error = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> removeTaskFromSession(String taskId) async {
+    if (_activeSession == null) return false;
+    try {
+      await ApiService.instance.post(
+        ApiConstants.removeTaskFromSession,
+        body: {'taskId': taskId},
+      );
+      final updated = _activeSession!.copyWith(
+          taskIds: _activeSession!.taskIds.where((t) => t != taskId).toList());
+      _activeSession = updated;
+      final idx = _sessions.indexWhere((s) => s.id == updated.id);
+      if (idx != -1) _sessions[idx] = updated;
+      notifyListeners();
+      return true;
+    } on ApiException catch (e) {
+      _error = e.message;
+      notifyListeners();
+      return false;
+    }
+  }
+
   Future<bool> deleteSession(String sessionId) async {
     try {
       await ApiService.instance

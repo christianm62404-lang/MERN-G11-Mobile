@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../providers/session_provider.dart';
 import '../../providers/project_provider.dart';
 import '../../models/session_model.dart';
+import '../../models/task_model.dart';
 import '../../widgets/empty_state.dart';
 import '../../utils/app_theme.dart';
 
@@ -102,9 +104,16 @@ class _SessionsScreenState extends State<SessionsScreen> {
                                 const SizedBox(height: 8),
                             itemBuilder: (_, i) {
                               final s = sessions.completedSessions[i];
+                              final title = _projectTitle(s.projectId);
                               return _SessionTile(
                                 session: s,
-                                projectTitle: _projectTitle(s.projectId),
+                                projectTitle: title,
+                                onTap: () => context.push(
+                                  Uri(
+                                    path: '/insights/session/${s.id}',
+                                    queryParameters: {'projectTitle': title},
+                                  ).toString(),
+                                ),
                                 onDelete: () =>
                                     sessions.deleteSession(s.id),
                               );
@@ -139,6 +148,28 @@ class _ActiveBanner extends StatelessWidget {
     required this.onStop,
     required this.onPause,
   });
+
+  Future<void> _showTaskSheet(BuildContext context) async {
+    final projects = context.read<ProjectProvider>();
+    await projects.fetchTasks(session.projectId);
+    if (!context.mounted) return;
+    final tasks = projects.tasksForProject(session.projectId);
+    if (tasks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No tasks in this project yet')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => _TaskLinkSheet(
+          session: session, tasks: tasks, projectId: session.projectId),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -177,6 +208,11 @@ class _ActiveBanner extends StatelessWidget {
             ),
           ),
           TextButton(
+            onPressed: () => _showTaskSheet(context),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.primaryColor),
+            child: const Text('Tasks'),
+          ),
+          TextButton(
             onPressed: onPause,
             style: TextButton.styleFrom(foregroundColor: AppTheme.warningColor),
             child: const Text('Pause'),
@@ -204,18 +240,23 @@ class _SessionTile extends StatelessWidget {
   final SessionModel session;
   final String projectTitle;
   final VoidCallback onDelete;
+  final VoidCallback onTap;
 
   const _SessionTile({
     required this.session,
     required this.projectTitle,
     required this.onDelete,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      child: Padding(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
@@ -262,6 +303,7 @@ class _SessionTile extends StatelessWidget {
               ],
             ),
           ],
+        ),
         ),
       ),
     );
@@ -330,6 +372,87 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
                     : const Text('Start Tracking'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Task Link Sheet ───────────────────────────────────────────────────────────
+
+class _TaskLinkSheet extends StatefulWidget {
+  final SessionModel session;
+  final List<TaskModel> tasks;
+  final String projectId;
+
+  const _TaskLinkSheet({
+    required this.session,
+    required this.tasks,
+    required this.projectId,
+  });
+
+  @override
+  State<_TaskLinkSheet> createState() => _TaskLinkSheetState();
+}
+
+class _TaskLinkSheetState extends State<_TaskLinkSheet> {
+  late Set<String> _linked;
+
+  @override
+  void initState() {
+    super.initState();
+    _linked = widget.session.taskIds.toSet();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Link Tasks to Session',
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text('Toggle tasks you worked on during this session',
+                style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurface.withOpacity(0.55))),
+            const SizedBox(height: 16),
+            ...widget.tasks.map((t) {
+              final linked = _linked.contains(t.id);
+              return CheckboxListTile(
+                value: linked,
+                contentPadding: EdgeInsets.zero,
+                title: Text(t.name,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                subtitle: t.description.isNotEmpty ? Text(t.description) : null,
+                controlAffinity: ListTileControlAffinity.leading,
+                onChanged: (val) async {
+                  final sessionProv = context.read<SessionProvider>();
+                  if (val == true) {
+                    final ok = await sessionProv.addTaskToSession(t.id);
+                    if (ok) setState(() => _linked.add(t.id));
+                  } else {
+                    final ok = await sessionProv.removeTaskFromSession(t.id);
+                    if (ok) setState(() => _linked.remove(t.id));
+                  }
+                },
+              );
+            }),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Done'),
               ),
             ),
           ],
