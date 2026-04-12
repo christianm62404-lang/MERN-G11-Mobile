@@ -1,21 +1,20 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import '../models/session_model.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
 
-class SessionProvider extends ChangeNotifier {
+class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   List<SessionModel> _sessions = [];
   SessionModel? _activeSession;
   String? _activeProjectTitle;
+  Duration? _frozenDuration;
   bool _isLoading = false;
   String? _error;
   Timer? _sessionTimer;
-  bool _isPaused = false;
-  Duration? _frozenDuration;
-  int _timerTick = 0;
 
   List<SessionModel> get sessions => _sessions;
   SessionModel? get activeSession => _activeSession;
@@ -23,13 +22,45 @@ class SessionProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasActiveSession => _activeSession != null;
-  bool get isPaused => _isPaused;
+
+  /// Whether the active session is currently paused.
+  bool get isPaused => _activeSession?.isPaused ?? false;
+
+  /// The duration captured at the moment the session was paused.
+  /// Used by the UI timer widgets to show a frozen value while paused.
   Duration? get frozenDuration => _frozenDuration;
+
+  SessionProvider() {
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// Stop and save the session when the app is closed or goes to background.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_activeSession != null &&
+        (state == AppLifecycleState.detached ||
+            state == AppLifecycleState.paused)) {
+      stopSession();
+    }
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sessionTimer?.cancel();
     super.dispose();
+  }
+
+  /// Clear all data on logout so another user's session is not visible.
+  void clearData() {
+    _sessions = [];
+    _activeSession = null;
+    _activeProjectTitle = null;
+    _frozenDuration = null;
+    _error = null;
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
+    notifyListeners();
   }
 
   Future<void> fetchSessions({String? projectId}) async {
@@ -52,11 +83,11 @@ class SessionProvider extends ChangeNotifier {
           .map((e) => SessionModel.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      try {
-        _activeSession = _sessions.firstWhere((s) => s.isActive);
-        if (_activeSession != null) _startTimer();
-      } catch (_) {
-        _activeSession = null;
+      // Restore active session and timer if one is found in the list
+      final active = _sessions.where((s) => s.isActive).toList();
+      if (active.isNotEmpty && _activeSession == null) {
+        _activeSession = active.first;
+        _startTimer();
       }
     } on ApiException catch (e) {
       _error = e.message;
@@ -82,6 +113,7 @@ class SessionProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// POST /sessions/create, then GET /sessions/start to begin tracking.
   Future<SessionModel?> startSession(String projectId, {String? projectTitle}) async {
     try {
       final info = await AuthService.instance.getUserInfo();
@@ -92,44 +124,44 @@ class SessionProvider extends ChangeNotifier {
         body: {'projectId': projectId, 'userId': userId},
       );
 
-      // Safe parse — never use 'as' directly, it can throw TypeError
+      // Build session from backend response or locally
+      final map = data as Map<String, dynamic>?;
       SessionModel session;
-      try {
-        final map = data is Map<String, dynamic>
-            ? data
-            : (data is Map ? Map<String, dynamic>.from(data as Map) : null);
-        if (map != null && map['projectId'] != null) {
-          session = SessionModel.fromJson(map);
-        } else {
-          final rawId = map?['insertedId'];
-          final id = rawId is String
-              ? rawId
-              : (rawId is Map
-                  ? rawId[r'$oid']?.toString() ?? rawId.values.first?.toString() ?? ''
-                  : rawId?.toString() ?? '');
-          session = SessionModel(
-            id: id.isNotEmpty ? id : DateTime.now().millisecondsSinceEpoch.toString(),
-            projectId: projectId,
-            startTime: DateTime.now(),
-          );
-        }
-      } catch (_) {
+      if (map != null && map['projectId'] != null) {
+        session = SessionModel.fromJson(map);
+      } else {
         session = SessionModel(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          id: map?['insertedId']?.toString() ?? map?['_id']?.toString() ?? '',
           projectId: projectId,
           startTime: DateTime.now(),
         );
       }
 
+      // Call GET /sessions/start so the backend marks it as running (not paused)
+      try {
+        final startData = await ApiService.instance.get(ApiConstants.startSession);
+        if (startData is Map) {
+          final started = SessionModel.fromJson(startData as Map<String, dynamic>);
+          if (started.id.isNotEmpty) session = started;
+        }
+      } catch (_) {
+        // Non-fatal — continue with the created session
+      }
+
+      // Anchor the live timer from now so elapsed starts at 0 for brand new sessions
+      if (!session.isPaused && (session.durationSeconds ?? 0) == 0) {
+        session = SessionModel(
+          id: session.id,
+          projectId: session.projectId,
+          startTime: DateTime.now(),
+          taskIds: session.taskIds,
+          isPaused: false,
+        );
+      }
+
       _activeSession = session;
       _activeProjectTitle = projectTitle;
-      _isPaused = false;
       _frozenDuration = null;
-
-      // Backend creates sessions as paused — resume immediately to start the timer
-      try {
-        await ApiService.instance.get(ApiConstants.startSession);
-      } catch (_) {} // best-effort; local timer still works if this fails
 
       final idx = _sessions.indexWhere((s) => s.id == session.id);
       if (idx == -1) {
@@ -145,25 +177,37 @@ class SessionProvider extends ChangeNotifier {
       _error = e.message;
       notifyListeners();
       return null;
-    } catch (e) {
-      _error = 'Failed to start session. Check your connection.';
-      notifyListeners();
-      return null;
     }
   }
 
+  /// Optimistically clears the active session immediately, then calls the backend.
   Future<SessionModel?> stopSession() async {
     if (_activeSession == null) return null;
+
+    final stoppingSession = _activeSession!;
+    final elapsed = stoppingSession.duration;
+
+    // Clear immediately so the UI updates without waiting for the network
+    _activeSession = null;
+    _activeProjectTitle = null;
+    _frozenDuration = null;
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
+    notifyListeners();
+
+    await NotificationService.instance.cancelAllNotifications();
+
     try {
-      // Backend has GET /sessions/stop (uses JWT to identify session, no body needed)
+      // Backend uses GET /sessions/stop — JWT identifies whose session to stop
       await ApiService.instance.get(ApiConstants.stopSession);
 
       final updated = SessionModel(
-        id: _activeSession!.id,
-        projectId: _activeSession!.projectId,
-        startTime: _activeSession!.startTime,
+        id: stoppingSession.id,
+        projectId: stoppingSession.projectId,
+        startTime: stoppingSession.startTime,
         endTime: DateTime.now(),
-        taskIds: _activeSession!.taskIds,
+        durationSeconds: elapsed.inSeconds,
+        taskIds: stoppingSession.taskIds,
       );
 
       final idx = _sessions.indexWhere((s) => s.id == updated.id);
@@ -172,14 +216,6 @@ class SessionProvider extends ChangeNotifier {
       } else {
         _sessions.insert(0, updated);
       }
-
-      _activeSession = null;
-      _activeProjectTitle = null;
-      _isPaused = false;
-      _frozenDuration = null;
-      _sessionTimer?.cancel();
-      _sessionTimer = null;
-      await NotificationService.instance.cancelAllNotifications();
       notifyListeners();
       return updated;
     } on ApiException catch (e) {
@@ -190,67 +226,51 @@ class SessionProvider extends ChangeNotifier {
   }
 
   Future<void> pauseSession() async {
-    if (_activeSession == null || _isPaused) return;
-    _isPaused = true;
+    if (_activeSession == null) return;
+    // Capture the live duration before pausing so the UI can show the frozen value
     _frozenDuration = _activeSession!.duration;
-    _sessionTimer?.cancel();
-    _sessionTimer = null;
-    notifyListeners();
     try {
-      await ApiService.instance.get(ApiConstants.pauseSession);
-    } catch (_) {}
-  }
-
-  Future<void> resumeSession() async {
-    if (_activeSession == null || !_isPaused) return;
-    _isPaused = false;
-    _frozenDuration = null;
-    _startTimer();
-    notifyListeners();
-    try {
-      await ApiService.instance.get(ApiConstants.startSession);
-    } catch (_) {}
-  }
-
-  Future<bool> addTaskToSession(String taskId) async {
-    if (_activeSession == null) return false;
-    try {
-      await ApiService.instance.post(
-        ApiConstants.addTaskToSession,
-        body: {'taskId': taskId},
-      );
-      final updated = _activeSession!.copyWith(
-          taskIds: [..._activeSession!.taskIds, taskId]);
-      _activeSession = updated;
-      final idx = _sessions.indexWhere((s) => s.id == updated.id);
-      if (idx != -1) _sessions[idx] = updated;
+      final data = await ApiService.instance.get(ApiConstants.pauseSession);
+      if (data != null && data is Map) {
+        _activeSession = SessionModel.fromJson(data as Map<String, dynamic>);
+      } else {
+        _activeSession = _activeSession!.copyWith(
+          isPaused: true,
+          durationSeconds: _frozenDuration!.inSeconds,
+        );
+      }
+      _sessionTimer?.cancel();
+      _sessionTimer = null;
       notifyListeners();
-      return true;
     } on ApiException catch (e) {
+      _frozenDuration = null; // revert on error
       _error = e.message;
       notifyListeners();
-      return false;
     }
   }
 
-  Future<bool> removeTaskFromSession(String taskId) async {
-    if (_activeSession == null) return false;
+  Future<void> resumeSession() async {
     try {
-      await ApiService.instance.post(
-        ApiConstants.removeTaskFromSession,
-        body: {'taskId': taskId},
-      );
-      final updated = _activeSession!.copyWith(
-          taskIds: _activeSession!.taskIds.where((t) => t != taskId).toList());
-      _activeSession = updated;
-      final idx = _sessions.indexWhere((s) => s.id == updated.id);
-      if (idx != -1) _sessions[idx] = updated;
+      final data = await ApiService.instance.get(ApiConstants.startSession);
+      if (data != null && data is Map) {
+        _activeSession = SessionModel.fromJson(data as Map<String, dynamic>);
+      } else if (_activeSession != null) {
+        // Anchor a fresh startTime so live elapsed resumes from accumulated total
+        _activeSession = SessionModel(
+          id: _activeSession!.id,
+          projectId: _activeSession!.projectId,
+          startTime: DateTime.now(),
+          durationSeconds: _activeSession!.durationSeconds,
+          taskIds: _activeSession!.taskIds,
+          isPaused: false,
+        );
+      }
+      _frozenDuration = null;
+      _startTimer();
       notifyListeners();
-      return true;
     } on ApiException catch (e) {
       _error = e.message;
       notifyListeners();
-      return false;
     }
   }
 
@@ -303,7 +323,9 @@ class SessionProvider extends ChangeNotifier {
       _sessions.removeWhere((s) => s.id == sessionId);
       if (_activeSession?.id == sessionId) {
         _activeSession = null;
+        _frozenDuration = null;
         _sessionTimer?.cancel();
+        _sessionTimer = null;
       }
       notifyListeners();
       return true;
@@ -314,19 +336,19 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
+  /// Ticks every second so the live timer updates in the UI.
   void _startTimer() {
-    _timerTick = 0;
     _sessionTimer?.cancel();
-    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_activeSession != null && !_isPaused) {
-        _timerTick++;
-        if (_timerTick % 30 == 0) {
+    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_activeSession != null && !_activeSession!.isPaused) {
+        notifyListeners();
+        // Show a reminder notification every 5 minutes
+        if (timer.tick % 300 == 0) {
           NotificationService.instance.showSessionReminder(
             projectTitle: _activeProjectTitle ?? 'Project',
             duration: _activeSession!.formattedDuration,
           );
         }
-        notifyListeners();
       }
     });
   }

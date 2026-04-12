@@ -16,20 +16,19 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (!kIsWeb) {
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
 
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark,
-    statusBarBrightness: Brightness.light,
-    systemNavigationBarColor: Colors.transparent,
-    systemNavigationBarIconBrightness: Brightness.dark,
-  ));
-}
-
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ));
+  }
 
   if (!kIsWeb) {
     await Firebase.initializeApp();
@@ -53,9 +52,16 @@ class MernG11App extends StatelessWidget {
       ],
       child: Builder(
         builder: (context) {
+          // Wire logout to clear other providers so data never leaks across accounts
+          final auth = context.read<AuthProvider>();
+          auth.onLogout = () {
+            context.read<ProjectProvider>().clearData();
+            context.read<SessionProvider>().clearData();
+          };
+
           final router = AppRouter.createRouter(context);
           return MaterialApp.router(
-            title: 'G11 Tracker',
+            title: 'TimeTrack',
             debugShowCheckedModeBanner: false,
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,

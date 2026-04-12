@@ -23,6 +23,14 @@ class ProjectProvider extends ChangeNotifier {
   List<NoteModel> notesForParent(String parentId) =>
       _notesByParent[parentId] ?? [];
 
+  void clearData() {
+    _projects = [];
+    _tasksByProject.clear();
+    _notesByParent.clear();
+    _error = null;
+    notifyListeners();
+  }
+
   // ── Projects ──────────────────────────────────────────────────
 
   Future<void> fetchProjects() async {
@@ -34,7 +42,6 @@ class ProjectProvider extends ChangeNotifier {
       final info = await AuthService.instance.getUserInfo();
       final userId = info['userId'] ?? '';
 
-      // GET /projects/fetch/many with body {id: userId}
       final data = await ApiService.instance.getWithBody(
         ApiConstants.fetchManyProjects,
         body: {'userId': userId},
@@ -56,13 +63,12 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<ProjectModel?> createProject({
     required String title,
-    required String description,
+    String description = '',
   }) async {
     try {
       final info = await AuthService.instance.getUserInfo();
       final userId = info['userId'] ?? '';
 
-      // POST /projects/create {title, description, id: userId}
       final data = await ApiService.instance.post(
         ApiConstants.createProject,
         body: {'title': title, 'description': description, 'id': userId},
@@ -95,7 +101,6 @@ class ProjectProvider extends ChangeNotifier {
       if (title != null) update['title'] = title;
       if (description != null) update['description'] = description;
 
-      // PUT /projects/update {id, update:{…}}
       await ApiService.instance
           .put(ApiConstants.updateProject, body: {'id': id, 'update': update});
 
@@ -141,7 +146,7 @@ class ProjectProvider extends ChangeNotifier {
           .map((e) => TaskModel.fromJson(e as Map<String, dynamic>))
           .toList();
       notifyListeners();
-    } on ApiException catch (_) {}
+    } catch (_) {}
   }
 
   Future<TaskModel?> createTask({
@@ -220,7 +225,7 @@ class ProjectProvider extends ChangeNotifier {
           .map((e) => NoteModel.fromJson(e as Map<String, dynamic>))
           .toList();
       notifyListeners();
-    } on ApiException catch (_) {}
+    } catch (_) {}
   }
 
   Future<NoteModel?> createNote({
@@ -228,21 +233,60 @@ class ProjectProvider extends ChangeNotifier {
     required String parentId,
     required String parentType,
   }) async {
+    NoteParentType pt;
+    switch (parentType) {
+      case 'task':
+        pt = NoteParentType.task;
+        break;
+      case 'session':
+        pt = NoteParentType.session;
+        break;
+      default:
+        pt = NoteParentType.project;
+    }
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final tempNote = NoteModel(
+      id: tempId,
+      content: content,
+      parentType: pt,
+      parentId: parentId,
+      createdAt: DateTime.now(),
+    );
+    _notesByParent[parentId] = [tempNote, ...(_notesByParent[parentId] ?? [])];
+    notifyListeners();
+
     try {
       final data = await ApiService.instance.post(
         ApiConstants.createNote,
-        body: {
-          'content': content,
-          'parentId': parentId,
-          'parentType': parentType
-        },
+        body: {'content': content, 'parentId': parentId, 'parentType': parentType},
       );
-      final note = NoteModel.fromJson(data as Map<String, dynamic>);
-      _notesByParent[parentId] = [note, ...(_notesByParent[parentId] ?? [])];
+
+      NoteModel? realNote;
+      if (data is Map<String, dynamic>) {
+        realNote = NoteModel.fromJson(data);
+      }
+
+      // Only replace the temp note if the server returned one with actual content.
+      // If the backend returned a minimal response (e.g. just insertedId),
+      // keep the temp note which already has the correct content.
+      final list = List<NoteModel>.from(_notesByParent[parentId] ?? []);
+      final idx = list.indexWhere((n) => n.id == tempId);
+      if (realNote != null && realNote.content.isNotEmpty && idx != -1) {
+        list[idx] = realNote;
+      } else if (realNote != null && realNote.content.isNotEmpty) {
+        list.insert(0, realNote);
+      }
+      _notesByParent[parentId] = list;
       notifyListeners();
-      return note;
+      return realNote ?? tempNote;
     } on ApiException catch (e) {
+      _notesByParent[parentId]?.removeWhere((n) => n.id == tempId);
       _error = e.message;
+      notifyListeners();
+      return null;
+    } catch (e) {
+      _notesByParent[parentId]?.removeWhere((n) => n.id == tempId);
+      _error = 'Failed to save note';
       notifyListeners();
       return null;
     }
@@ -270,7 +314,6 @@ class ProjectProvider extends ChangeNotifier {
   List _asList(dynamic data) {
     if (data is List) return data;
     if (data is Map) {
-      // Sometimes wrapped in another key
       for (final key in ['projects', 'tasks', 'notes', 'sessions']) {
         if (data[key] is List) return data[key] as List;
       }
