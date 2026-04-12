@@ -1,10 +1,11 @@
 class SessionModel {
   final String id;
   final String projectId;
-  final DateTime startTime;
+  final DateTime startTime; // maps to backend 'currentTime' (last resume time)
   final DateTime? endTime;
-  final int? durationSeconds;
+  final int? durationSeconds; // maps to backend 'totalTime' (accumulated seconds)
   final List<String> taskIds;
+  final bool isPaused;
 
   SessionModel({
     required this.id,
@@ -13,16 +14,21 @@ class SessionModel {
     this.endTime,
     this.durationSeconds,
     this.taskIds = const [],
+    this.isPaused = false,
   });
 
   bool get isActive => endTime == null;
 
   Duration get duration {
-    if (durationSeconds != null) {
-      return Duration(seconds: durationSeconds!);
+    if (endTime != null) {
+      if (durationSeconds != null) return Duration(seconds: durationSeconds!);
+      return endTime!.difference(startTime);
     }
-    final end = endTime ?? DateTime.now();
-    return end.difference(startTime);
+    if (isPaused) {
+      return Duration(seconds: durationSeconds ?? 0);
+    }
+    final accumulated = Duration(seconds: durationSeconds ?? 0);
+    return accumulated + DateTime.now().difference(startTime);
   }
 
   String get formattedDuration {
@@ -31,71 +37,58 @@ class SessionModel {
     final minutes = d.inMinutes.remainder(60);
     final seconds = d.inSeconds.remainder(60);
     if (hours > 0) {
-      return '${hours}h ${minutes}m';
+      return '${hours}h ${minutes.toString().padLeft(2, '0')}m';
     } else if (minutes > 0) {
-      return '${minutes}m ${seconds}s';
+      return '${minutes}m ${seconds.toString().padLeft(2, '0')}s';
     }
     return '${seconds}s';
   }
 
   factory SessionModel.fromJson(Map<String, dynamic> json) {
-    // Tasks: backend stores as [{taskId: ObjectId, totalTime: num}] or plain strings
-    final rawTasks = json['taskIds'] ?? json['tasks'];
-    final tasks = <String>[];
-    if (rawTasks is List) {
-        for (final t in rawTasks) {
-            if (t is String) {
-                tasks.add(t);
-            } else if (t is Map) {
-                final tid = t['taskId']?.toString() ?? t['_id']?.toString();
-                if (tid != null && tid.isNotEmpty) tasks.add(tid);
-            }
-        }
-    }
+    final startRaw = json['currentTime'] ?? json['startTime'];
+    final durRaw = json['totalTime'] ?? json['duration'];
 
-    // Start time: backend uses 'currentTime' (set on creation, updated on resume)
-    DateTime startTime = DateTime.now();
-    for (final key in ['startTime', 'startedAt', 'currentTime']) {
-        if (json[key] != null) {
-            startTime = DateTime.tryParse(json[key].toString()) ?? startTime;
-            break;
-        }
-    }
-
-    // Duration: backend uses 'totalTime' in seconds
-    int? durationSecs;
-    final rawTotal = json['totalTime'] ?? json['duration'] ?? json['durationSeconds'];
-    if (rawTotal is num) durationSecs = rawTotal.toInt();
-
-    // End time + active state
-    DateTime? endTime;
-    if (json['endTime'] != null) {
-        endTime = DateTime.tryParse(json['endTime'].toString());
-    }
-    // Backend marks sessions inactive with active: false
-    if (json['active'] == false && endTime == null) {
-        endTime = DateTime.now();
-    }
+    final rawTasks = json['taskIds'] ?? json['tasks'] ?? const [];
+    final tasks = (rawTasks as List).map<String>((e) {
+      if (e is String) return e;
+      if (e is Map) return (e['taskId'] ?? e['_id'] ?? '').toString();
+      return e.toString();
+    }).where((s) => s.isNotEmpty).toList();
 
     return SessionModel(
-        id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
-        projectId: json['projectId']?.toString() ?? '',
-        startTime: startTime,
-        endTime: endTime,
-        durationSeconds: durationSecs,
-        taskIds: tasks,
+      id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
+      projectId: json['projectId']?.toString() ?? '',
+      startTime: startRaw != null
+          ? DateTime.tryParse(startRaw.toString()) ?? DateTime.now()
+          : DateTime.now(),
+      endTime: json['endTime'] != null
+          ? DateTime.tryParse(json['endTime'].toString())
+          : null,
+      durationSeconds: durRaw != null
+          ? (durRaw is int ? durRaw : int.tryParse(durRaw.toString()))
+          : null,
+      taskIds: tasks,
+      isPaused: json['paused'] == true,
     );
-}
+  }
 
-
-  SessionModel copyWith({List<String>? taskIds}) {
+  SessionModel copyWith({
+    String? id,
+    String? projectId,
+    DateTime? startTime,
+    DateTime? endTime,
+    int? durationSeconds,
+    List<String>? taskIds,
+    bool? isPaused,
+  }) {
     return SessionModel(
-      id: id,
-      projectId: projectId,
-      startTime: startTime,
-      endTime: endTime,
-      durationSeconds: durationSeconds,
+      id: id ?? this.id,
+      projectId: projectId ?? this.projectId,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
       taskIds: taskIds ?? this.taskIds,
+      isPaused: isPaused ?? this.isPaused,
     );
   }
 
@@ -105,8 +98,9 @@ class SessionModel {
       'projectId': projectId,
       'startTime': startTime.toIso8601String(),
       if (endTime != null) 'endTime': endTime!.toIso8601String(),
-      if (durationSeconds != null) 'duration': durationSeconds,
+      if (durationSeconds != null) 'totalTime': durationSeconds,
       'taskIds': taskIds,
+      'paused': isPaused,
     };
   }
 }

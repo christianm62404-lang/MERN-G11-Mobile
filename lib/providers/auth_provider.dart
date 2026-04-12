@@ -18,6 +18,9 @@ class AuthProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get isLoading => _isLoading;
 
+  /// Set this in main.dart to clear other providers on logout.
+  VoidCallback? onLogout;
+
   AuthProvider() {
     _checkAuthState();
   }
@@ -38,7 +41,6 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Decode JWT payload → UserModel (no extra API call needed).
   UserModel _userFromToken(String token) {
     final payload = JwtDecoder.decode(token);
     return UserModel(
@@ -56,7 +58,6 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Response is already unwrapped to `data` by ApiService → { token }
       final data = await ApiService.instance.post(
         ApiConstants.loginUser,
         body: {'email': email, 'password': password},
@@ -79,7 +80,6 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } on ApiException catch (e) {
-      // EMAIL_NOT_VERIFIED → redirect to verify screen
       if (e.errorCode == 'EMAIL_NOT_VERIFIED') {
         _status = AuthStatus.unverified;
       } else {
@@ -99,7 +99,6 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  /// Returns email so the caller can redirect to verify screen.
   Future<bool> register({
     required String email,
     required String password,
@@ -115,7 +114,6 @@ class AuthProvider extends ChangeNotifier {
         body: {'email': email, 'password': password, 'firstName': firstName},
         requireAuth: false,
       );
-      // Registration succeeded — user needs to verify email before login.
       _status = AuthStatus.unverified;
       notifyListeners();
       return true;
@@ -194,6 +192,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    onLogout?.call(); // clears ProjectProvider + SessionProvider first
     await AuthService.instance.logout();
     _user = null;
     _status = AuthStatus.unauthenticated;
@@ -206,7 +205,6 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Called when user arrives at unverified state from login screen
   void setUnverified() {
     _status = AuthStatus.unverified;
     notifyListeners();

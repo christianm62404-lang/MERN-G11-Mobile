@@ -92,7 +92,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
               onRefresh: _loadData,
               child: CustomScrollView(
                 slivers: [
-                  // ── Active session banner ───────────────────────
+                  // ── Active session banner ───────────────────────────────
                   if (sessions.hasActiveSession)
                     SliverToBoxAdapter(
                       child: _ActiveSessionBanner(
@@ -102,7 +102,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Stats row ───────────────────────────────────
+                  // ── Stats row ───────────────────────────────────────────
                   if (completed.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -137,7 +137,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Recent sessions header ───────────────────────
+                  // ── Recent sessions header ──────────────────────────────
                   if (completed.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -152,7 +152,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Empty state ─────────────────────────────────
+                  // ── Empty state ─────────────────────────────────────────
                   if (completed.isEmpty && !sessions.hasActiveSession)
                     SliverFillRemaining(
                       child: EmptyState(
@@ -165,7 +165,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Sessions list ───────────────────────────────
+                  // ── Sessions list ───────────────────────────────────────
                   if (completed.isNotEmpty)
                     SliverList(
                       delegate: SliverChildBuilderDelegate(
@@ -206,7 +206,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 }
 
-// ── Active Session Banner ─────────────────────────────────────────────────────
+// ── Active Session Banner ───────────────────────────────────────────────────
 
 class _ActiveSessionBanner extends StatelessWidget {
   final SessionModel session;
@@ -380,7 +380,7 @@ class _BannerTextButton extends StatelessWidget {
       );
 }
 
-// ── Banner live timer ─────────────────────────────────────────────────────────
+// ── Banner live timer ───────────────────────────────────────────────────────
 
 class _BannerTimer extends StatefulWidget {
   final SessionModel session;
@@ -407,8 +407,8 @@ class _BannerTimerState extends State<_BannerTimer> {
 
   void _startTick() {
     _tick?.cancel();
-    _tick =
-        Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() {}); });
+    _tick = Timer.periodic(
+        const Duration(seconds: 1), (_) { if (mounted) setState(() {}); });
   }
 
   @override
@@ -447,7 +447,7 @@ class _BannerTimerState extends State<_BannerTimer> {
   }
 }
 
-// ── Stat card ─────────────────────────────────────────────────────────────────
+// ── Stat card ───────────────────────────────────────────────────────────────
 
 class _StatCard extends StatelessWidget {
   final String label, value;
@@ -527,7 +527,7 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ── Focus Mode Screen ─────────────────────────────────────────────────────────
+// ── Focus Mode Screen ───────────────────────────────────────────────────────
 
 class _FocusModeScreen extends StatefulWidget {
   final SessionModel session;
@@ -548,8 +548,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
       final projectId = widget.session.projectId;
       Future.wait([
         context.read<ProjectProvider>().fetchTasks(projectId),
-        context.read<ProjectProvider>()
-            .fetchNotes(widget.session.id, 'session'),
+        context.read<ProjectProvider>().fetchNotes(widget.session.id, 'session'),
       ]);
     });
   }
@@ -575,7 +574,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
     );
     if (ok == true && mounted) {
       await context.read<SessionProvider>().stopSession();
-      if (mounted) Navigator.pop(context); // close focus mode after stopping
+      if (mounted) Navigator.pop(context);
     }
   }
 
@@ -614,12 +613,17 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
     }
   }
 
-  void _showTaskLinkSheet(
-      BuildContext context, List<TaskModel> tasks, SessionModel session) {
+  // FIX: async — always fetches tasks before opening the sheet so the list
+  // is never empty due to a race between initState fetch and the user tapping.
+  Future<void> _showTaskLinkSheet(
+      BuildContext context, SessionModel session) async {
+    await context.read<ProjectProvider>().fetchTasks(session.projectId);
+    if (!context.mounted) return;
+    final tasks =
+        context.read<ProjectProvider>().tasksForProject(session.projectId);
     if (tasks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('No tasks in this project yet')),
+        const SnackBar(content: Text('No tasks in this project yet')),
       );
       return;
     }
@@ -629,8 +633,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
       useSafeArea: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) =>
-          _TaskLinkSheet(session: session, tasks: tasks),
+      builder: (ctx) => _TaskLinkSheet(session: session, tasks: tasks),
     );
   }
 
@@ -642,9 +645,10 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
 
     final session = sessionProv.activeSession ?? widget.session;
     final isPaused = sessionProv.isPaused;
-    final allTasks = projectProv.tasksForProject(session.projectId);
-    final linkedTasks =
-        allTasks.where((t) => session.taskIds.contains(t.id)).toList();
+    final linkedTasks = projectProv
+        .tasksForProject(session.projectId)
+        .where((t) => session.taskIds.contains(t.id))
+        .toList();
     final notes = projectProv.notesForParent(session.id);
 
     // If session was stopped, close focus mode
@@ -667,7 +671,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Timer block ─────────────────────────────────────
+            // ── Timer block ────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
               child: Column(
@@ -719,7 +723,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
             ),
             const Divider(height: 1),
 
-            // ── Tasks ───────────────────────────────────────────
+            // ── Tasks ───────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
@@ -732,8 +736,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                       )),
                   const Spacer(),
                   TextButton.icon(
-                    onPressed: () =>
-                        _showTaskLinkSheet(context, allTasks, session),
+                    onPressed: () => _showTaskLinkSheet(context, session),
                     icon: const Icon(Icons.add, size: 15),
                     label: const Text('Add task'),
                     style: TextButton.styleFrom(
@@ -759,7 +762,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
               ...linkedTasks.map((t) => _TaskCard(task: t)),
             const Divider(height: 24),
 
-            // ── Notes ───────────────────────────────────────────
+            // ── Notes ───────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Row(
@@ -809,7 +812,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
   }
 }
 
-// ── Status badge ──────────────────────────────────────────────────────────────
+// ── Status badge ────────────────────────────────────────────────────────────
 
 class _StatusBadge extends StatelessWidget {
   final bool isPaused;
@@ -856,7 +859,7 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-// ── Large timer (focus mode) ──────────────────────────────────────────────────
+// ── Large timer (focus mode) ─────────────────────────────────────────────────
 
 class _LargeTimer extends StatefulWidget {
   final SessionModel session;
@@ -927,7 +930,7 @@ class _LargeTimerState extends State<_LargeTimer> {
   }
 }
 
-// ── Task card ─────────────────────────────────────────────────────────────────
+// ── Task card ────────────────────────────────────────────────────────────────
 
 class _TaskCard extends StatelessWidget {
   final TaskModel task;
@@ -963,7 +966,7 @@ class _TaskCard extends StatelessWidget {
   }
 }
 
-// ── Note card ─────────────────────────────────────────────────────────────────
+// ── Note card ────────────────────────────────────────────────────────────────
 
 class _NoteCard extends StatelessWidget {
   final NoteModel note;
@@ -1001,7 +1004,7 @@ class _NoteCard extends StatelessWidget {
   }
 }
 
-// ── Session tile ──────────────────────────────────────────────────────────────
+// ── Session tile ─────────────────────────────────────────────────────────────
 
 class _SessionTile extends StatelessWidget {
   final SessionModel session;
@@ -1216,14 +1219,20 @@ class _TaskLinkSheetState extends State<_TaskLinkSheet> {
                     : null,
                 controlAffinity: ListTileControlAffinity.leading,
                 onChanged: (val) async {
+                  // FIX: optimistic — update checkbox immediately, revert on failure
+                  setState(() {
+                    if (val == true) _linked.add(t.id);
+                    else _linked.remove(t.id);
+                  });
                   final sp = context.read<SessionProvider>();
-                  if (val == true) {
-                    final ok = await sp.addTaskToSession(t.id);
-                    if (ok && mounted) setState(() => _linked.add(t.id));
-                  } else {
-                    final ok = await sp.removeTaskFromSession(t.id);
-                    if (ok && mounted)
-                      setState(() => _linked.remove(t.id));
+                  final ok = val == true
+                      ? await sp.addTaskToSession(t.id)
+                      : await sp.removeTaskFromSession(t.id);
+                  if (!ok && mounted) {
+                    setState(() {
+                      if (val == true) _linked.remove(t.id);
+                      else _linked.add(t.id);
+                    });
                   }
                 },
               );
