@@ -13,6 +13,9 @@ class SessionProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   Timer? _sessionTimer;
+  bool _isPaused = false;
+  Duration? _frozenDuration;
+  int _timerTick = 0;
 
   List<SessionModel> get sessions => _sessions;
   SessionModel? get activeSession => _activeSession;
@@ -20,6 +23,8 @@ class SessionProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasActiveSession => _activeSession != null;
+  bool get isPaused => _isPaused;
+  Duration? get frozenDuration => _frozenDuration;
 
   @override
   void dispose() {
@@ -63,7 +68,6 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
-  /// Also fetches current status from the server (active session state).
   Future<void> fetchStatus() async {
     try {
       final data = await ApiService.instance.get(ApiConstants.sessionStatus);
@@ -78,7 +82,6 @@ class SessionProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// POST /sessions/create {projectId, userId}
   Future<SessionModel?> startSession(String projectId, {String? projectTitle}) async {
     try {
       final info = await AuthService.instance.getUserInfo();
@@ -89,18 +92,44 @@ class SessionProvider extends ChangeNotifier {
         body: {'projectId': projectId, 'userId': userId},
       );
 
-      // Backend returns full session doc; fall back to building locally if needed
-      final map = data as Map<String, dynamic>?;
-      final session = (map != null && map['projectId'] != null)
-          ? SessionModel.fromJson(map)
-          : SessionModel(
-              id: map?['insertedId']?.toString() ?? map?['_id']?.toString() ?? '',
-              projectId: projectId,
-              startTime: DateTime.now(),
-            );
+      // Safe parse — never use 'as' directly, it can throw TypeError
+      SessionModel session;
+      try {
+        final map = data is Map<String, dynamic>
+            ? data
+            : (data is Map ? Map<String, dynamic>.from(data as Map) : null);
+        if (map != null && map['projectId'] != null) {
+          session = SessionModel.fromJson(map);
+        } else {
+          final rawId = map?['insertedId'];
+          final id = rawId is String
+              ? rawId
+              : (rawId is Map
+                  ? rawId[r'$oid']?.toString() ?? rawId.values.first?.toString() ?? ''
+                  : rawId?.toString() ?? '');
+          session = SessionModel(
+            id: id.isNotEmpty ? id : DateTime.now().millisecondsSinceEpoch.toString(),
+            projectId: projectId,
+            startTime: DateTime.now(),
+          );
+        }
+      } catch (_) {
+        session = SessionModel(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          projectId: projectId,
+          startTime: DateTime.now(),
+        );
+      }
 
       _activeSession = session;
       _activeProjectTitle = projectTitle;
+      _isPaused = false;
+      _frozenDuration = null;
+
+      // Backend creates sessions as paused — resume immediately to start the timer
+      try {
+        await ApiService.instance.get(ApiConstants.startSession);
+      } catch (_) {} // best-effort; local timer still works if this fails
 
       final idx = _sessions.indexWhere((s) => s.id == session.id);
       if (idx == -1) {
@@ -116,19 +145,19 @@ class SessionProvider extends ChangeNotifier {
       _error = e.message;
       notifyListeners();
       return null;
+    } catch (e) {
+      _error = 'Failed to start session. Check your connection.';
+      notifyListeners();
+      return null;
     }
   }
 
-  /// POST /sessions/stop {id}
   Future<SessionModel?> stopSession() async {
     if (_activeSession == null) return null;
     try {
-      await ApiService.instance.post(
-        ApiConstants.stopSession,
-        body: {'id': _activeSession!.id},
-      );
+      // Backend has GET /sessions/stop (uses JWT to identify session, no body needed)
+      await ApiService.instance.get(ApiConstants.stopSession);
 
-      // Backend returns updateOne result, not the doc — build locally
       final updated = SessionModel(
         id: _activeSession!.id,
         projectId: _activeSession!.projectId,
@@ -146,6 +175,8 @@ class SessionProvider extends ChangeNotifier {
 
       _activeSession = null;
       _activeProjectTitle = null;
+      _isPaused = false;
+      _frozenDuration = null;
       _sessionTimer?.cancel();
       _sessionTimer = null;
       await NotificationService.instance.cancelAllNotifications();
@@ -158,34 +189,68 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
-  /// GET /sessions/pause
   Future<void> pauseSession() async {
+    if (_activeSession == null || _isPaused) return;
+    _isPaused = true;
+    _frozenDuration = _activeSession!.duration;
+    _sessionTimer?.cancel();
+    _sessionTimer = null;
+    notifyListeners();
     try {
-      final data = await ApiService.instance.get(ApiConstants.pauseSession);
-      if (data != null) {
-        final updated = SessionModel.fromJson(data as Map<String, dynamic>);
-        _activeSession = updated;
-        notifyListeners();
-      }
+      await ApiService.instance.get(ApiConstants.pauseSession);
+    } catch (_) {}
+  }
+
+  Future<void> resumeSession() async {
+    if (_activeSession == null || !_isPaused) return;
+    _isPaused = false;
+    _frozenDuration = null;
+    _startTimer();
+    notifyListeners();
+    try {
+      await ApiService.instance.get(ApiConstants.startSession);
+    } catch (_) {}
+  }
+
+  Future<bool> addTaskToSession(String taskId) async {
+    if (_activeSession == null) return false;
+    try {
+      await ApiService.instance.post(
+        ApiConstants.addTaskToSession,
+        body: {'taskId': taskId},
+      );
+      final updated = _activeSession!.copyWith(
+          taskIds: [..._activeSession!.taskIds, taskId]);
+      _activeSession = updated;
+      final idx = _sessions.indexWhere((s) => s.id == updated.id);
+      if (idx != -1) _sessions[idx] = updated;
+      notifyListeners();
+      return true;
     } on ApiException catch (e) {
       _error = e.message;
       notifyListeners();
+      return false;
     }
   }
 
-  /// GET /sessions/start (resume a paused session)
-  Future<void> resumeSession() async {
+  Future<bool> removeTaskFromSession(String taskId) async {
+    if (_activeSession == null) return false;
     try {
-      final data = await ApiService.instance.get(ApiConstants.startSession);
-      if (data != null) {
-        final updated = SessionModel.fromJson(data as Map<String, dynamic>);
-        _activeSession = updated;
-        _startTimer();
-        notifyListeners();
-      }
+      await ApiService.instance.post(
+        ApiConstants.removeTaskFromSession,
+        body: {'taskId': taskId},
+      );
+      final updated = _activeSession!.copyWith(
+          taskIds: _activeSession!.taskIds.where((t) => t != taskId).toList());
+      _activeSession = updated;
+      final idx = _sessions.indexWhere((s) => s.id == updated.id);
+      if (idx != -1) _sessions[idx] = updated;
+      notifyListeners();
+      return true;
     } on ApiException catch (e) {
       _error = e.message;
       notifyListeners();
+      return false;
     }
   }
 
@@ -250,13 +315,17 @@ class SessionProvider extends ChangeNotifier {
   }
 
   void _startTimer() {
+    _timerTick = 0;
     _sessionTimer?.cancel();
-    _sessionTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (_activeSession != null) {
-        NotificationService.instance.showSessionReminder(
-          projectTitle: _activeProjectTitle ?? 'Project',
-          duration: _activeSession!.formattedDuration,
-        );
+    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_activeSession != null && !_isPaused) {
+        _timerTick++;
+        if (_timerTick % 30 == 0) {
+          NotificationService.instance.showSessionReminder(
+            projectTitle: _activeProjectTitle ?? 'Project',
+            duration: _activeSession!.formattedDuration,
+          );
+        }
         notifyListeners();
       }
     });

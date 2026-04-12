@@ -16,19 +16,20 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   if (!kIsWeb) {
-    await SystemChrome.setPreferredOrientations([
-      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.dark,
-        statusBarBrightness: Brightness.light,
-        systemNavigationBarColor: Colors.transparent,
-        systemNavigationBarIconBrightness: Brightness.dark,
-      ));
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-  }
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  ));
+}
+
 
   if (!kIsWeb) {
     await Firebase.initializeApp();
