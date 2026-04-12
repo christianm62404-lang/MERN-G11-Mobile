@@ -101,7 +101,10 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen> {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => context.go('/login'),
+                onPressed: () async {
+                  await context.read<AuthProvider>().logout();
+                  if (context.mounted) context.go('/login');
+                  },
                 child: const Text('Back to Sign In'),
               ),
               const SizedBox(height: 16),

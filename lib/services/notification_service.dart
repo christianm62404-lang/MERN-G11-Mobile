@@ -1,16 +1,9 @@
 import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
 import 'auth_service.dart';
-// Add this import at the top:
-import 'package:flutter/foundation.dart' show kIsWeb;
-
-// Add this as the first line inside initialize():
-Future<void> initialize() async {
-  if (kIsWeb) return;   // ← add this line
-  // ... rest of existing code ...
-
 
 // Background message handler — must be top-level function
 @pragma('vm:entry-point')
@@ -26,47 +19,36 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
-  // Notification channel for Android
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
-    'g11_tracker_channel',
-    'G11 Tracker Notifications',
+    'timetrack_channel',
+    'TimeTrack Notifications',
     description: 'Notifications for project and session updates',
     importance: Importance.high,
     playSound: true,
   );
 
-  // Callback for when a notification is tapped
   Function(Map<String, dynamic>)? onNotificationTap;
 
   Future<void> initialize() async {
-    // Register background handler
+    if (kIsWeb) return;
+
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-    // Request permission
     await _requestPermission();
-
-    // Set up local notifications
     await _setupLocalNotifications();
-
-    // Get and save FCM token
     await _saveFcmToken();
 
-    // Listen to token refresh
     _fcm.onTokenRefresh.listen((token) async {
       await AuthService.instance.saveFcmToken(token);
     });
 
-    // Handle foreground messages
     FirebaseMessaging.onMessage.listen((message) {
       _showLocalNotification(message);
     });
 
-    // Handle notification tap when app is in background/terminated
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       _handleNotificationTap(message.data);
     });
 
-    // Check if app was opened via notification
     final initialMessage = await _fcm.getInitialMessage();
     if (initialMessage != null) {
       _handleNotificationTap(initialMessage.data);
@@ -89,12 +71,10 @@ class NotificationService {
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
     );
-
     await _localNotifications.initialize(
       initSettings,
       onDidReceiveNotificationResponse: (details) {
@@ -106,8 +86,6 @@ class NotificationService {
         }
       },
     );
-
-    // Create Android notification channel
     await _localNotifications
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
@@ -125,12 +103,10 @@ class NotificationService {
   Future<void> _showLocalNotification(RemoteMessage message) async {
     final notification = message.notification;
     final android = message.notification?.android;
-
     if (notification == null) return;
-
     await _localNotifications.show(
       notification.hashCode,
-      notification.title ?? 'G11 Tracker',
+      notification.title ?? 'TimeTrack',
       notification.body ?? '',
       NotificationDetails(
         android: AndroidNotificationDetails(
@@ -140,7 +116,7 @@ class NotificationService {
           importance: Importance.high,
           priority: Priority.high,
           icon: android?.smallIcon ?? '@mipmap/ic_launcher',
-          color: const Color(0xFF6366F1),
+          color: const Color(0xFF004D44),
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,
@@ -156,9 +132,7 @@ class NotificationService {
     onNotificationTap?.call(data);
   }
 
-  Future<String?> getToken() async {
-    return await _fcm.getToken();
-  }
+  Future<String?> getToken() async => await _fcm.getToken();
 
   Future<void> subscribeToTopic(String topic) async {
     await _fcm.subscribeToTopic(topic);
@@ -168,7 +142,6 @@ class NotificationService {
     await _fcm.unsubscribeFromTopic(topic);
   }
 
-  /// Show a local notification for session reminders
   Future<void> showSessionReminder({
     required String projectTitle,
     required String duration,
@@ -187,7 +160,7 @@ class NotificationService {
           ongoing: true,
           autoCancel: false,
           icon: '@mipmap/ic_launcher',
-          color: const Color(0xFF6366F1),
+          color: const Color(0xFF004D44),
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: false,

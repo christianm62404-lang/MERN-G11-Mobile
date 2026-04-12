@@ -37,7 +37,7 @@ class ProjectProvider extends ChangeNotifier {
       // GET /projects/fetch/many with body {id: userId}
       final data = await ApiService.instance.getWithBody(
         ApiConstants.fetchManyProjects,
-        body: {'id': userId},
+        body: {'userId': userId},
       );
 
       final list = _asList(data);
@@ -68,7 +68,16 @@ class ProjectProvider extends ChangeNotifier {
         body: {'title': title, 'description': description, 'id': userId},
       );
 
-      final project = ProjectModel.fromJson(data as Map<String, dynamic>);
+      final map = data as Map<String, dynamic>?;
+      final project = (map != null && map['title'] != null)
+          ? ProjectModel.fromJson(map)
+          : ProjectModel(
+              id: map?['insertedId']?.toString() ?? map?['_id']?.toString() ?? '',
+              title: title,
+              description: description,
+              userId: userId,
+              createdAt: DateTime.now(),
+            );
       _projects.insert(0, project);
       notifyListeners();
       return project;

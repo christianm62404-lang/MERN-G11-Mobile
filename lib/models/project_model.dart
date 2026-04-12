@@ -18,7 +18,7 @@ class ProjectModel {
       id: json['_id'] ?? json['id'] ?? '',
       title: json['title'] ?? '',
       description: json['description'] ?? '',
-      userId: json['id'] ?? '',
+      userId: json['userId'] ?? json['id'] ?? '',
       createdAt: json['createdAt'] != null
           ? DateTime.tryParse(json['createdAt']) ?? DateTime.now()
           : DateTime.now(),
