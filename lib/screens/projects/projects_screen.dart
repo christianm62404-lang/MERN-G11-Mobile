@@ -56,7 +56,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 ? EmptyState(
                     icon: Icons.folder_outlined,
                     title: 'No Projects Yet',
-                    subtitle: 'Create your first project to start tracking time',
+                    subtitle:
+                        'Create your first project to start tracking time',
                     actionLabel: 'Create Project',
                     onAction: _showCreateDialog,
                   )
@@ -114,15 +115,18 @@ class _ProjectTile extends StatelessWidget {
                   isScrollControlled: true,
                   useSafeArea: true,
                   shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(20)),
                   ),
                   builder: (_) => _ProjectFormSheet(project: project),
                 );
               },
             ),
             ListTile(
-              leading: const Icon(Icons.delete_outlined, color: AppTheme.errorColor),
-              title: const Text('Delete Project', style: TextStyle(color: AppTheme.errorColor)),
+              leading: const Icon(Icons.delete_outlined,
+                  color: AppTheme.errorColor),
+              title: const Text('Delete Project',
+                  style: TextStyle(color: AppTheme.errorColor)),
               onTap: () {
                 Navigator.pop(ctx);
                 _confirmDelete(context);
@@ -140,15 +144,19 @@ class _ProjectTile extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Project?'),
-        content: Text('Are you sure you want to delete "${project.title}"? This cannot be undone.'),
+        content: Text(
+            'Are you sure you want to delete "${project.title}"? This cannot be undone.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
               context.read<ProjectProvider>().deleteProject(project.id);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.errorColor),
             child: const Text('Delete'),
           ),
         ],
@@ -162,9 +170,9 @@ class _ProjectTile extends StatelessWidget {
 
     return Card(
       child: InkWell(
-        onTap: () => context.push(
-       '/projects/${project.id}?title=${Uri.encodeComponent(project.title)}',
-      ),
+        onTap: () => context.go(
+          '/projects/${project.id}?title=${Uri.encodeComponent(project.title)}',
+        ),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -177,7 +185,8 @@ class _ProjectTile extends StatelessWidget {
                   color: AppTheme.primaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.folder, color: AppTheme.primaryColor),
+                child:
+                    const Icon(Icons.folder, color: AppTheme.primaryColor),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -186,7 +195,8 @@ class _ProjectTile extends StatelessWidget {
                   children: [
                     Text(
                       project.title,
-                      style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                      style: theme.textTheme.bodyLarge
+                          ?.copyWith(fontWeight: FontWeight.w600),
                     ),
                     if (project.description.isNotEmpty)
                       Text(
@@ -232,8 +242,10 @@ class _ProjectFormSheetState extends State<_ProjectFormSheet> {
   @override
   void initState() {
     super.initState();
-    _titleController = TextEditingController(text: widget.project?.title ?? '');
-    _descController = TextEditingController(text: widget.project?.description ?? '');
+    _titleController =
+        TextEditingController(text: widget.project?.title ?? '');
+    _descController =
+        TextEditingController(text: widget.project?.description ?? '');
   }
 
   @override
@@ -274,48 +286,67 @@ class _ProjectFormSheetState extends State<_ProjectFormSheet> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 24,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _isEditing ? 'Edit Project' : 'New Project',
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 20),
-            TextFormField(
-              controller: _titleController,
-              decoration: const InputDecoration(labelText: 'Project Title'),
-              textInputAction: TextInputAction.next,
-              validator: (v) => v?.isEmpty ?? true ? 'Title is required' : null,
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _descController,
-              decoration: const InputDecoration(labelText: 'Description (optional)'),
-              maxLines: 3,
-              textInputAction: TextInputAction.done,
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _submit,
-                child: _isLoading
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : Text(_isEditing ? 'Save Changes' : 'Create Project'),
+    // SingleChildScrollView keeps the submit button accessible when
+    // the keyboard is open — description is NOT required.
+    return SingleChildScrollView(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 24,
+          right: 24,
+          top: 24,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+        ),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _isEditing ? 'Edit Project' : 'New Project',
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w700),
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              TextFormField(
+                controller: _titleController,
+                decoration:
+                    const InputDecoration(labelText: 'Project Title'),
+                textInputAction: TextInputAction.next,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty)
+                        ? 'Title is required'
+                        : null,
+              ),
+              const SizedBox(height: 12),
+              // Description is OPTIONAL — no validator
+              TextFormField(
+                controller: _descController,
+                decoration: const InputDecoration(
+                  labelText: 'Description',
+                  hintText: 'Optional',
+                ),
+                maxLines: 3,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _submit(),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _submit,
+                  child: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : Text(
+                          _isEditing ? 'Save Changes' : 'Create Project'),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
