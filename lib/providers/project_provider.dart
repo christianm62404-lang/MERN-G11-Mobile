@@ -39,13 +39,9 @@ class ProjectProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final info = await AuthService.instance.getUserInfo();
-      final userId = info['userId'] ?? '';
-
-      final data = await ApiService.instance.getWithBody(
-        ApiConstants.fetchManyProjects,
-        body: {'userId': userId},
-      );
+      // Backend reads userId from the JWT — no body needed.
+      final data =
+          await ApiService.instance.get(ApiConstants.fetchManyProjects);
 
       final list = _asList(data);
       _projects = list
@@ -63,7 +59,7 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<ProjectModel?> createProject({
     required String title,
-    String description = '', // optional
+    String description = '',
   }) async {
     try {
       final info = await AuthService.instance.getUserInfo();
@@ -78,9 +74,7 @@ class ProjectProvider extends ChangeNotifier {
       final project = (map != null && map['title'] != null)
           ? ProjectModel.fromJson(map)
           : ProjectModel(
-              id: map?['insertedId']?.toString() ??
-                  map?['_id']?.toString() ??
-                  '',
+              id: map?['insertedId']?.toString() ?? map?['_id']?.toString() ?? '',
               title: title,
               description: description,
               userId: userId,
@@ -148,7 +142,9 @@ class ProjectProvider extends ChangeNotifier {
           .map((e) => TaskModel.fromJson(e as Map<String, dynamic>))
           .toList();
       notifyListeners();
-    } catch (_) {}
+    } catch (_) {
+      // Keep existing tasks on failure
+    }
   }
 
   Future<TaskModel?> createTask({
@@ -159,11 +155,7 @@ class ProjectProvider extends ChangeNotifier {
     try {
       final data = await ApiService.instance.post(
         ApiConstants.createTask,
-        body: {
-          'projectId': projectId,
-          'name': name,
-          'description': description
-        },
+        body: {'projectId': projectId, 'name': name, 'description': description},
       );
       final task = TaskModel.fromJson(data as Map<String, dynamic>);
       _tasksByProject[projectId] = [
@@ -239,7 +231,6 @@ class ProjectProvider extends ChangeNotifier {
     required String parentId,
     required String parentType,
   }) async {
-    // Optimistic: show the note immediately
     NoteParentType pt;
     switch (parentType) {
       case 'task':
@@ -259,20 +250,13 @@ class ProjectProvider extends ChangeNotifier {
       parentId: parentId,
       createdAt: DateTime.now(),
     );
-    _notesByParent[parentId] = [
-      tempNote,
-      ...(_notesByParent[parentId] ?? [])
-    ];
+    _notesByParent[parentId] = [tempNote, ...(_notesByParent[parentId] ?? [])];
     notifyListeners();
 
     try {
       final data = await ApiService.instance.post(
         ApiConstants.createNote,
-        body: {
-          'content': content,
-          'parentId': parentId,
-          'parentType': parentType
-        },
+        body: {'content': content, 'parentId': parentId, 'parentType': parentType},
       );
 
       NoteModel? realNote;
@@ -287,7 +271,6 @@ class ProjectProvider extends ChangeNotifier {
       } else if (realNote != null && realNote.content.isNotEmpty) {
         list.insert(0, realNote);
       }
-      // Keep temp note when backend returns empty content (just insertedId)
       _notesByParent[parentId] = list;
       notifyListeners();
       return realNote ?? tempNote;

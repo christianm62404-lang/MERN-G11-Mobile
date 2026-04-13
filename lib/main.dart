@@ -20,7 +20,6 @@ void main() async {
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
-
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
@@ -52,14 +51,11 @@ class MernG11App extends StatelessWidget {
       ],
       child: Builder(
         builder: (context) {
-          // Wire up onLogout so both providers clear when the user logs out,
-          // preventing one user's data from leaking to the next.
           final auth = context.read<AuthProvider>();
           auth.onLogout = () {
+            context.read<SessionProvider>().stopAndClear();
             context.read<ProjectProvider>().clearData();
-            context.read<SessionProvider>().clearData();
           };
-
           final router = AppRouter.createRouter(context);
           return MaterialApp.router(
             title: 'TimeTrack',

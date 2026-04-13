@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import '../models/session_model.dart';
 import '../services/api_service.dart';
-import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
 
@@ -15,6 +14,9 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _isLoading = false;
   String? _error;
   Timer? _sessionTimer;
+
+  // Guards against concurrent startSession calls
+  bool _isStarting = false;
 
   List<SessionModel> get sessions => _sessions;
   SessionModel? get activeSession => _activeSession;
@@ -30,13 +32,16 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
   }
 
+  /// On mobile only: sync with backend when returning to foreground.
+  /// On web, tab-switch fires this event — skipping it prevents the
+  /// active session from being cleared by a stale backend response.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      // Re-sync session from backend when user returns to the app.
-      // Do NOT stop the session on background — the backend keeps tracking.
+    if (!kIsWeb && state == AppLifecycleState.resumed) {
       fetchStatus();
     }
+    // NEVER call stopSession() here. Sessions only end when the user
+    // explicitly stops them or signs out.
   }
 
   @override
@@ -46,16 +51,28 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     super.dispose();
   }
 
+  // ── Lifecycle helpers ───────────────────────────────────────────────────────
+
+  void stopAndClear() {
+    if (_activeSession != null) {
+      ApiService.instance.get(ApiConstants.stopSession).catchError((_) {});
+    }
+    clearData();
+  }
+
   void clearData() {
     _sessions = [];
     _activeSession = null;
     _activeProjectTitle = null;
     _frozenDuration = null;
     _error = null;
+    _isStarting = false;
     _sessionTimer?.cancel();
     _sessionTimer = null;
     notifyListeners();
   }
+
+  // ── Fetch ───────────────────────────────────────────────────────────────────
 
   Future<void> fetchSessions({String? projectId}) async {
     _isLoading = true;
@@ -63,27 +80,33 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      final info = await AuthService.instance.getUserInfo();
-      final body = <String, dynamic>{'userId': info['userId'] ?? ''};
-      if (projectId != null) body['projectId'] = projectId;
-
-      final data = await ApiService.instance.getWithBody(
-        ApiConstants.fetchManySessions,
-        body: body,
-      );
+      final data =
+          await ApiService.instance.get(ApiConstants.fetchManySessions);
 
       final list = data is List
           ? data
           : (data is Map ? (data['sessions'] ?? []) : []);
-      _sessions = (list as List)
+
+      final allSessions = (list as List)
           .map((e) => SessionModel.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      // Restore active session if one is still running
-      final active = _sessions.where((s) => s.isActive).toList();
-      if (active.isNotEmpty && _activeSession == null) {
-        _activeSession = active.first;
-        if (!_activeSession!.isPaused) _startTimer();
+      allSessions.sort((a, b) => b.startTime.compareTo(a.startTime));
+      _sessions = allSessions;
+
+      if (_activeSession == null) {
+        final running =
+            _sessions.where((s) => s.isActive && !s.isPaused).toList();
+        final paused =
+            _sessions.where((s) => s.isActive && s.isPaused).toList();
+
+        if (running.isNotEmpty) {
+          _activeSession = running.first;
+          _startTimer();
+        } else if (paused.isNotEmpty) {
+          _activeSession = paused.first;
+          _frozenDuration = paused.first.duration;
+        }
       }
     } on ApiException catch (e) {
       _error = e.message;
@@ -99,34 +122,44 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final data = await ApiService.instance.get(ApiConstants.sessionStatus);
       if (data is Map && data['session'] != null) {
-        final synced =
+        final session =
             SessionModel.fromJson(data['session'] as Map<String, dynamic>);
-        _activeSession = synced;
-        if (!synced.isPaused) {
+        _activeSession = session;
+        if (!session.isPaused) {
           _startTimer();
         } else {
           _sessionTimer?.cancel();
           _sessionTimer = null;
+          _frozenDuration = session.duration;
         }
         notifyListeners();
       } else {
-        _activeSession = null;
-        _sessionTimer?.cancel();
-        _sessionTimer = null;
-        notifyListeners();
+        if (_activeSession != null) {
+          _activeSession = null;
+          _frozenDuration = null;
+          _sessionTimer?.cancel();
+          _sessionTimer = null;
+          notifyListeners();
+        }
       }
     } catch (_) {}
   }
 
+  // ── Session control ─────────────────────────────────────────────────────────
+
+  /// Guards:
+  /// 1. If an active session already exists locally, return it — no API call.
+  /// 2. If a start call is already in flight, do nothing (prevents duplicate sessions).
   Future<SessionModel?> startSession(String projectId,
       {String? projectTitle}) async {
-    try {
-      final info = await AuthService.instance.getUserInfo();
-      final userId = info['userId'] ?? '';
+    if (_activeSession != null) return _activeSession;
+    if (_isStarting) return null;
+    _isStarting = true;
 
+    try {
       final data = await ApiService.instance.post(
         ApiConstants.createSession,
-        body: {'projectId': projectId, 'userId': userId},
+        body: {'projectId': projectId},
       );
 
       final map = data as Map<String, dynamic>?;
@@ -142,9 +175,6 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
           startTime: DateTime.now(),
         );
       }
-
-      // Backend creates sessions as active (not paused), so no need to call
-      // /sessions/start here — that endpoint is only for resuming paused sessions.
 
       _activeSession = session;
       _activeProjectTitle = projectTitle;
@@ -164,31 +194,31 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _error = e.message;
       notifyListeners();
       return null;
+    } catch (e) {
+      _error = 'Failed to start session';
+      notifyListeners();
+      return null;
+    } finally {
+      _isStarting = false;
     }
   }
 
-  /// Immediately marks the session as completed in the list (so it never
-  /// disappears), then tells the backend to stop it.
   Future<SessionModel?> stopSession() async {
     if (_activeSession == null) return null;
 
     final stoppingSession = _activeSession!;
-    final elapsed = stoppingSession.duration;
     final endTime = DateTime.now();
 
-    // Build the completed record immediately
     final completed = SessionModel(
       id: stoppingSession.id,
       projectId: stoppingSession.projectId,
       startTime: stoppingSession.startTime,
       endTime: endTime,
       pausedDurationMs: stoppingSession.pausedDurationMs,
-      durationSeconds: elapsed.inSeconds,
       taskIds: stoppingSession.taskIds,
       isPaused: false,
     );
 
-    // Update UI immediately — session moves to completedSessions right now
     _activeSession = null;
     _activeProjectTitle = null;
     _frozenDuration = null;
@@ -205,25 +235,25 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     await NotificationService.instance.cancelAllNotifications();
 
-    // Fire-and-forget backend call — session is already saved locally
     try {
       await ApiService.instance.get(ApiConstants.stopSession);
     } on ApiException catch (e) {
       _error = e.message;
       notifyListeners();
-    }
+    } catch (_) {}
 
     return completed;
   }
 
-  /// Optimistically pauses locally first, then syncs with backend.
   Future<void> pauseSession() async {
     if (_activeSession == null) return;
 
     _frozenDuration = _activeSession!.duration;
+    final pausedAt = DateTime.now();
+
     _activeSession = _activeSession!.copyWith(
       isPaused: true,
-      durationSeconds: _frozenDuration!.inSeconds,
+      pausedAt: pausedAt,
     );
     _sessionTimer?.cancel();
     _sessionTimer = null;
@@ -232,30 +262,35 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final data = await ApiService.instance.get(ApiConstants.pauseSession);
       if (data != null && data is Map) {
-        final updated =
-            SessionModel.fromJson(data as Map<String, dynamic>);
-        if (updated.id.isNotEmpty) {
-          _activeSession =
-              updated.isPaused ? updated : updated.copyWith(isPaused: true);
-          notifyListeners();
-        }
+        final updated = SessionModel.fromJson(data as Map<String, dynamic>);
+        _activeSession = updated;
+        _frozenDuration = updated.duration;
+        notifyListeners();
       }
     } on ApiException catch (e) {
+      _activeSession =
+          _activeSession?.copyWith(isPaused: false, clearPausedAt: true);
+      _frozenDuration = null;
+      _startTimer();
       _error = e.message;
       notifyListeners();
-    }
+    } catch (_) {}
   }
 
-  /// Optimistically resumes locally first, then syncs with backend.
   Future<void> resumeSession() async {
     if (_activeSession == null) return;
+
+    final additionalPausedMs = _activeSession!.pausedAt != null
+        ? DateTime.now().difference(_activeSession!.pausedAt!).inMilliseconds
+        : 0;
+    final newPausedDurationMs =
+        _activeSession!.pausedDurationMs + additionalPausedMs;
 
     _activeSession = SessionModel(
       id: _activeSession!.id,
       projectId: _activeSession!.projectId,
-      startTime: DateTime.now(),
-      pausedDurationMs: _activeSession!.pausedDurationMs,
-      durationSeconds: _activeSession!.durationSeconds,
+      startTime: _activeSession!.startTime,
+      pausedDurationMs: newPausedDurationMs,
       taskIds: _activeSession!.taskIds,
       isPaused: false,
     );
@@ -266,18 +301,26 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final data = await ApiService.instance.get(ApiConstants.startSession);
       if (data != null && data is Map) {
-        final updated =
-            SessionModel.fromJson(data as Map<String, dynamic>);
-        if (updated.id.isNotEmpty && !updated.isPaused) {
-          _activeSession = updated;
-          notifyListeners();
-        }
+        final updated = SessionModel.fromJson(data as Map<String, dynamic>);
+        _activeSession = updated;
+        notifyListeners();
       }
     } on ApiException catch (e) {
+      _activeSession = _activeSession?.copyWith(
+        isPaused: true,
+        pausedAt: DateTime.now(),
+        pausedDurationMs:
+            _activeSession!.pausedDurationMs - additionalPausedMs,
+      );
+      _sessionTimer?.cancel();
+      _sessionTimer = null;
+      _frozenDuration = _activeSession?.duration;
       _error = e.message;
       notifyListeners();
-    }
+    } catch (_) {}
   }
+
+  // ── Task linking ────────────────────────────────────────────────────────────
 
   Future<bool> addTaskToSession(String taskId) async {
     if (_activeSession == null) return false;
@@ -295,6 +338,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       return true;
     } on ApiException catch (e) {
       _error = e.message;
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _error = 'Failed to link task';
       notifyListeners();
       return false;
     }
@@ -319,6 +366,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _error = e.message;
       notifyListeners();
       return false;
+    } catch (e) {
+      _error = 'Failed to unlink task';
+      notifyListeners();
+      return false;
     }
   }
 
@@ -339,8 +390,14 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _error = e.message;
       notifyListeners();
       return false;
+    } catch (e) {
+      _error = 'Failed to delete session';
+      notifyListeners();
+      return false;
     }
   }
+
+  // ── Timer ───────────────────────────────────────────────────────────────────
 
   void _startTimer() {
     _sessionTimer?.cancel();
@@ -357,7 +414,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     });
   }
 
-  // Sorted newest-first
+  // ── Computed views ──────────────────────────────────────────────────────────
+
   List<SessionModel> get completedSessions {
     final list = _sessions.where((s) => !s.isActive).toList();
     list.sort((a, b) => b.startTime.compareTo(a.startTime));
@@ -367,8 +425,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   Map<String, Duration> get durationByProject {
     final map = <String, Duration>{};
     for (final s in completedSessions) {
-      map[s.projectId] =
-          (map[s.projectId] ?? Duration.zero) + s.duration;
+      map[s.projectId] = (map[s.projectId] ?? Duration.zero) + s.duration;
     }
     return map;
   }

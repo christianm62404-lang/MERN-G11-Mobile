@@ -33,6 +33,10 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   void _showStartDialog() {
+    final sessions = context.read<SessionProvider>();
+    // Don't open if still loading data or already tracking a session
+    if (sessions.isLoading || sessions.hasActiveSession) return;
+
     final projects = context.read<ProjectProvider>().projects;
     if (projects.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -62,6 +66,9 @@ class _SessionsScreenState extends State<SessionsScreen> {
       }
     }
 
+    // Only allow starting when not already loading and not already tracking
+    final canStart = !sessions.hasActiveSession && !sessions.isLoading;
+
     final completed = sessions.completedSessions;
     final now = DateTime.now();
     final monthStart = DateTime(now.year, now.month, 1);
@@ -80,7 +87,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
       appBar: AppBar(
         title: const Text('Sessions'),
         actions: [
-          if (!sessions.hasActiveSession)
+          if (canStart)
             IconButton(
               icon: const Icon(Icons.play_circle_outline),
               onPressed: _showStartDialog,
@@ -158,7 +165,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
                         subtitle:
                             'Start a session to track time on your projects',
                         actionLabel: 'Start Session',
-                        onAction: _showStartDialog,
+                        onAction: canStart ? _showStartDialog : null,
                       ),
                     ),
 
@@ -191,7 +198,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
                 ],
               ),
             ),
-      floatingActionButton: !sessions.hasActiveSession
+      floatingActionButton: canStart
           ? FloatingActionButton.extended(
               onPressed: _showStartDialog,
               icon: const Icon(Icons.play_arrow),
@@ -601,7 +608,6 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
 
   Future<void> _showTaskLinkSheet(
       BuildContext context, SessionModel session) async {
-    // Always fetch fresh so we get all project tasks
     await context.read<ProjectProvider>().fetchTasks(session.projectId);
     if (!context.mounted) return;
 
@@ -609,7 +615,6 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
         context.read<ProjectProvider>().tasksForProject(session.projectId);
 
     if (tasks.isEmpty) {
-      // Project has no tasks — explain and offer to go create one
       await showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -720,7 +725,6 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
             ),
             const Divider(height: 1),
 
-            // ── Tasks ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
@@ -760,7 +764,6 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
               ...linkedTasks.map((t) => _TaskCard(task: t)),
             const Divider(height: 24),
 
-            // ── Notes ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Row(
@@ -840,8 +843,7 @@ class _StatusBadge extends StatelessWidget {
           if (isPaused)
             const Padding(
               padding: EdgeInsets.only(right: 4),
-              child: Icon(Icons.pause,
-                  size: 12, color: AppTheme.warningColor),
+              child: Icon(Icons.pause, size: 12, color: AppTheme.warningColor),
             ),
           Text(
             isPaused ? 'PAUSED' : 'ACTIVE',
@@ -950,8 +952,7 @@ class _TaskCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(task.description,
                 style: theme.textTheme.bodySmall?.copyWith(
-                    color:
-                        theme.colorScheme.onSurface.withOpacity(0.5))),
+                    color: theme.colorScheme.onSurface.withOpacity(0.5))),
           ],
         ],
       ),
@@ -982,8 +983,7 @@ class _NoteCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-              child:
-                  Text(note.content, style: theme.textTheme.bodyMedium)),
+              child: Text(note.content, style: theme.textTheme.bodyMedium)),
           IconButton(
             icon: const Icon(Icons.delete_outline,
                 size: 16, color: AppTheme.errorColor),
@@ -1103,8 +1103,7 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
             const SizedBox(height: 4),
             Text('Select a project to track time for',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                    color:
-                        theme.colorScheme.onSurface.withOpacity(0.6))),
+                    color: theme.colorScheme.onSurface.withOpacity(0.6))),
             const SizedBox(height: 16),
             ...widget.projects.map((p) => RadioListTile<String>(
                   title: Text(p.title),
@@ -1122,20 +1121,30 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
                 onPressed: _selectedId == null || _loading
                     ? null
                     : () async {
+                        // Double-tap guard
+                        if (_loading) return;
                         setState(() => _loading = true);
+
+                        final sessionProv = context.read<SessionProvider>();
+
+                        // Race-condition guard: session may have started elsewhere
+                        if (sessionProv.hasActiveSession) {
+                          if (context.mounted) Navigator.pop(context);
+                          return;
+                        }
+
                         final p = widget.projects
                             .firstWhere((x) => x.id == _selectedId);
-                        final result = await context
-                            .read<SessionProvider>()
-                            .startSession(_selectedId!,
-                                projectTitle: p.title);
+                        final result = await sessionProv.startSession(
+                          _selectedId!,
+                          projectTitle: p.title,
+                        );
                         if (!mounted) return;
                         if (result != null) {
                           Navigator.pop(context);
                         } else {
                           setState(() => _loading = false);
-                          final err =
-                              context.read<SessionProvider>().error;
+                          final err = sessionProv.error;
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                             content:
                                 Text(err ?? 'Failed to start session'),
@@ -1199,9 +1208,9 @@ class _TaskLinkSheetState extends State<_TaskLinkSheet> {
                     color: theme.colorScheme.onSurface.withOpacity(0.55))),
             const SizedBox(height: 16),
             ...widget.tasks.map((t) {
-              final linked = _linked.contains(t.id);
+              final isLinked = _linked.contains(t.id);
               return CheckboxListTile(
-                value: linked,
+                value: isLinked,
                 contentPadding: EdgeInsets.zero,
                 title: Text(t.name,
                     style: theme.textTheme.bodyMedium
@@ -1210,18 +1219,35 @@ class _TaskLinkSheetState extends State<_TaskLinkSheet> {
                     t.description.isNotEmpty ? Text(t.description) : null,
                 controlAffinity: ListTileControlAffinity.leading,
                 onChanged: (val) async {
+                  if (val == null) return;
+
+                  // Optimistic flip
                   setState(() {
-                    if (val == true) _linked.add(t.id);
-                    else _linked.remove(t.id);
+                    if (val) {
+                      _linked.add(t.id);
+                    } else {
+                      _linked.remove(t.id);
+                    }
                   });
+
                   final sp = context.read<SessionProvider>();
-                  final ok = val == true
-                      ? await sp.addTaskToSession(t.id)
-                      : await sp.removeTaskFromSession(t.id);
+                  bool ok;
+                  try {
+                    ok = val
+                        ? await sp.addTaskToSession(t.id)
+                        : await sp.removeTaskFromSession(t.id);
+                  } catch (_) {
+                    ok = false;
+                  }
+
+                  // Revert on failure
                   if (!ok && mounted) {
                     setState(() {
-                      if (val == true) _linked.remove(t.id);
-                      else _linked.add(t.id);
+                      if (val) {
+                        _linked.remove(t.id);
+                      } else {
+                        _linked.add(t.id);
+                      }
                     });
                   }
                 },
