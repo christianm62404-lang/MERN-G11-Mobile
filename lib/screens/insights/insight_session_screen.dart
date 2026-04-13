@@ -33,7 +33,6 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    // Fetch all sessions so we can find ours
     await context.read<SessionProvider>().fetchSessions();
     final sessions = context.read<SessionProvider>().sessions;
     try {
@@ -56,17 +55,20 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
     final projects = context.watch<ProjectProvider>();
     final sessionProv = context.watch<SessionProvider>();
 
-    // Keep session in sync
     if (_session != null) {
       try {
-        _session = sessionProv.sessions.firstWhere((s) => s.id == widget.sessionId);
+        _session =
+            sessionProv.sessions.firstWhere((s) => s.id == widget.sessionId);
       } catch (_) {}
     }
 
     final session = _session;
-    final notes = session != null ? projects.notesForParent(session.id) : <NoteModel>[];
-    final allTasks = session != null ? projects.tasksForProject(session.projectId) : [];
-    final linkedTasks = allTasks.where((t) => session?.taskIds.contains(t.id) ?? false).toList();
+    final notes =
+        session != null ? projects.notesForParent(session.id) : <NoteModel>[];
+    final allTasks =
+        session != null ? projects.tasksForProject(session.projectId) : [];
+    final linkedTasks =
+        allTasks.where((t) => session?.taskIds.contains(t.id) ?? false).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -88,17 +90,42 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ── Session summary card ──────────────────
-                        _SessionSummaryCard(
-                            session: session, projectTitle: widget.projectTitle),
-                        const SizedBox(height: 24),
+                        // ── Header ────────────────────────────────
+                        Text(
+                          'SESSION INSIGHT',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.4,
+                            color: AppTheme.primaryColor,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.projectTitle,
+                          style: theme.textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          DateFormat('EEEE, MMMM d, y')
+                              .format(session.startTime),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurface
+                                  .withOpacity(0.5)),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // ── Duration / Start / End boxes ──────────
+                        _MetricRow(session: session),
+                        const SizedBox(height: 28),
 
                         // ── Linked tasks ──────────────────────────
-                        _SectionHeader('Tasks Worked On'),
-                        const SizedBox(height: 8),
-                        if (linkedTasks.isEmpty)
-                          _EmptyCard('No tasks linked to this session')
-                        else
+                        if (linkedTasks.isNotEmpty) ...[
+                          _SectionHeader('Tasks Worked On'),
+                          const SizedBox(height: 8),
                           ...linkedTasks.map((t) => Card(
                                 margin: const EdgeInsets.only(bottom: 8),
                                 child: Padding(
@@ -108,25 +135,38 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
                                       Container(
                                         padding: const EdgeInsets.all(6),
                                         decoration: BoxDecoration(
-                                          color: AppTheme.primaryColor.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(6),
+                                          color: AppTheme.primaryColor
+                                              .withOpacity(0.1),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
                                         ),
-                                        child: const Icon(Icons.check_circle_outline,
-                                            color: AppTheme.primaryColor, size: 16),
+                                        child: const Icon(
+                                            Icons.check_circle_outline,
+                                            color: AppTheme.primaryColor,
+                                            size: 16),
                                       ),
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(t.name,
-                                                style: theme.textTheme.bodyLarge
-                                                    ?.copyWith(fontWeight: FontWeight.w600)),
+                                                style: theme
+                                                    .textTheme.bodyLarge
+                                                    ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w600)),
                                             if (t.description.isNotEmpty)
                                               Text(t.description,
-                                                  style: theme.textTheme.bodySmall?.copyWith(
-                                                      color: theme.colorScheme.onSurface
-                                                          .withOpacity(0.55))),
+                                                  style: theme
+                                                      .textTheme.bodySmall
+                                                      ?.copyWith(
+                                                          color: theme
+                                                              .colorScheme
+                                                              .onSurface
+                                                              .withOpacity(
+                                                                  0.55))),
                                           ],
                                         ),
                                       ),
@@ -134,23 +174,40 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
                                   ),
                                 ),
                               )),
-                        const SizedBox(height: 24),
+                          const SizedBox(height: 20),
+                        ],
 
-                        // ── Session notes ─────────────────────────
+                        // ── Notes ─────────────────────────────────
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            _SectionHeader('Session Notes'),
+                            _SectionHeader('Notes'),
                             TextButton.icon(
                               icon: const Icon(Icons.add, size: 16),
-                              label: const Text('Add'),
-                              onPressed: () => _showAddNote(context, session.id),
+                              label: const Text('Add Note'),
+                              onPressed: () =>
+                                  _showAddNote(context, session.id),
                             ),
                           ],
                         ),
                         const SizedBox(height: 8),
                         if (notes.isEmpty)
-                          _EmptyCard('No notes for this session')
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(24),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.onSurface
+                                  .withOpacity(0.04),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'No notes for this session yet.',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurface
+                                      .withOpacity(0.4)),
+                            ),
+                          )
                         else
                           ...notes.map((n) => _NoteTile(
                                 note: n,
@@ -186,7 +243,7 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Add Session Note',
+            Text('Add Note',
                 style: Theme.of(ctx)
                     .textTheme
                     .titleLarge
@@ -211,7 +268,6 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
                         parentType: 'session',
                       );
                   if (ctx.mounted) Navigator.pop(ctx);
-                  _load();
                 },
                 child: const Text('Save Note'),
               ),
@@ -223,119 +279,72 @@ class _InsightSessionScreenState extends State<InsightSessionScreen> {
   }
 }
 
-// ── Session summary card ──────────────────────────────────────────────────────
+// ── Three metric boxes ────────────────────────────────────────────────────────
 
-class _SessionSummaryCard extends StatelessWidget {
+class _MetricRow extends StatelessWidget {
   final SessionModel session;
-  final String projectTitle;
-  const _SessionSummaryCard(
-      {required this.session, required this.projectTitle});
+  const _MetricRow({required this.session});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final dur = session.duration;
     final h = dur.inHours;
     final m = dur.inMinutes.remainder(60);
-    final s = dur.inSeconds.remainder(60);
-    final durationStr = h > 0 ? '${h}h ${m}m' : m > 0 ? '${m}m ${s}s' : '${s}s';
+    final durationStr =
+        h > 0 ? '${h}h ${m}m' : m > 0 ? '${m}m' : '${dur.inSeconds}s';
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.warningColor.withOpacity(0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.timer_outlined,
-                      color: AppTheme.warningColor, size: 22),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(projectTitle,
-                          style: theme.textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                      Text(
-                        DateFormat('EEE, MMM d y').format(session.startTime),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurface.withOpacity(0.5)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            const Divider(height: 1),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                _InfoPill(
-                    icon: Icons.schedule_outlined,
-                    label: durationStr,
-                    color: AppTheme.primaryColor),
-                const SizedBox(width: 12),
-                _InfoPill(
-                    icon: Icons.access_time,
-                    label: DateFormat('h:mm a').format(session.startTime),
-                    color: AppTheme.secondaryColor),
-                if (session.endTime != null) ...[
-                  const SizedBox(width: 12),
-                  _InfoPill(
-                      icon: Icons.flag_outlined,
-                      label: DateFormat('h:mm a').format(session.endTime!),
-                      color: AppTheme.warningColor),
-                ],
-              ],
-            ),
-            if (session.taskIds.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _InfoPill(
-                  icon: Icons.task_alt_outlined,
-                  label: '${session.taskIds.length} task${session.taskIds.length == 1 ? '' : 's'}',
-                  color: AppTheme.primaryDark),
-            ],
-          ],
-        ),
-      ),
+    final startStr = DateFormat('h:mm a').format(session.startTime);
+    final endStr = session.endTime != null
+        ? DateFormat('h:mm a').format(session.endTime!)
+        : '—';
+
+    return Row(
+      children: [
+        Expanded(child: _MetricBox(label: 'DURATION', value: durationStr)),
+        const SizedBox(width: 10),
+        Expanded(child: _MetricBox(label: 'START', value: startStr)),
+        const SizedBox(width: 10),
+        Expanded(child: _MetricBox(label: 'END', value: endStr)),
+      ],
     );
   }
 }
 
-class _InfoPill extends StatelessWidget {
-  final IconData icon;
+class _MetricBox extends StatelessWidget {
   final String label;
-  final Color color;
-  const _InfoPill({required this.icon, required this.label, required this.color});
+  final String value;
+  const _MetricBox({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: theme.colorScheme.onSurface.withOpacity(0.1)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+              color: theme.colorScheme.onSurface.withOpacity(0.45),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );
@@ -397,23 +406,4 @@ class _NoteTile extends StatelessWidget {
       ),
     );
   }
-}
-
-class _EmptyCard extends StatelessWidget {
-  final String message;
-  const _EmptyCard(this.message);
-  @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Center(
-            child: Text(message,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withOpacity(0.4))),
-          ),
-        ),
-      );
 }

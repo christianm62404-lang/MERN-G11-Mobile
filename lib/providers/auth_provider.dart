@@ -18,7 +18,7 @@ class AuthProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get isLoading => _isLoading;
 
-  /// Set this in main.dart to clear other providers on logout.
+  /// Called before the token is cleared — use this to reset other providers.
   VoidCallback? onLogout;
 
   AuthProvider() {
@@ -192,7 +192,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
-    onLogout?.call(); // clears ProjectProvider + SessionProvider first
+    onLogout?.call(); // clear other providers before wiping the token
     await AuthService.instance.logout();
     _user = null;
     _status = AuthStatus.unauthenticated;

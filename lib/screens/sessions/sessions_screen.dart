@@ -36,7 +36,8 @@ class _SessionsScreenState extends State<SessionsScreen> {
     final projects = context.read<ProjectProvider>().projects;
     if (projects.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Create a project first to start a session')),
+        const SnackBar(
+            content: Text('Create a project first to start a session')),
       );
       return;
     }
@@ -92,7 +93,6 @@ class _SessionsScreenState extends State<SessionsScreen> {
               onRefresh: _loadData,
               child: CustomScrollView(
                 slivers: [
-                  // ── Active session banner ───────────────────────────────
                   if (sessions.hasActiveSession)
                     SliverToBoxAdapter(
                       child: _ActiveSessionBanner(
@@ -102,7 +102,6 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Stats row ───────────────────────────────────────────
                   if (completed.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -137,7 +136,6 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Recent sessions header ──────────────────────────────
                   if (completed.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -152,7 +150,6 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Empty state ─────────────────────────────────────────
                   if (completed.isEmpty && !sessions.hasActiveSession)
                     SliverFillRemaining(
                       child: EmptyState(
@@ -165,7 +162,6 @@ class _SessionsScreenState extends State<SessionsScreen> {
                       ),
                     ),
 
-                  // ── Sessions list ───────────────────────────────────────
                   if (completed.isNotEmpty)
                     SliverList(
                       delegate: SliverChildBuilderDelegate(
@@ -222,7 +218,8 @@ class _ActiveSessionBanner extends StatelessWidget {
     final sessionProv = context.watch<SessionProvider>();
     final isPaused = sessionProv.isPaused;
     final theme = Theme.of(context);
-    final accentColor = isPaused ? AppTheme.warningColor : AppTheme.primaryColor;
+    final accentColor =
+        isPaused ? AppTheme.warningColor : AppTheme.primaryColor;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
@@ -234,7 +231,6 @@ class _ActiveSessionBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Left: indicator + title + timer
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -279,7 +275,6 @@ class _ActiveSessionBanner extends StatelessWidget {
               ],
             ),
           ),
-          // Right: action buttons
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -388,9 +383,7 @@ class _BannerTimer extends StatefulWidget {
   final Duration? frozenDuration;
 
   const _BannerTimer(
-      {required this.session,
-      required this.isPaused,
-      this.frozenDuration});
+      {required this.session, required this.isPaused, this.frozenDuration});
 
   @override
   State<_BannerTimer> createState() => _BannerTimerState();
@@ -440,10 +433,8 @@ class _BannerTimerState extends State<_BannerTimer> {
         ? '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'
         : '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
 
-    return Text(
-      text,
-      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-    );
+    return Text(text,
+        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800));
   }
 }
 
@@ -466,9 +457,7 @@ class _StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: highlight
-            ? AppTheme.primaryColor
-            : theme.colorScheme.surface,
+        color: highlight ? AppTheme.primaryColor : theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
         border: highlight
             ? null
@@ -498,25 +487,21 @@ class _StatCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
-                  color: highlight
-                      ? Colors.white
-                      : theme.colorScheme.primary,
+                  color: highlight ? Colors.white : theme.colorScheme.primary,
                 ),
               ),
               if (unit != null) ...[
                 const SizedBox(width: 2),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 2),
-                  child: Text(
-                    unit!,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: highlight
-                          ? Colors.white70
-                          : theme.colorScheme.onSurface.withOpacity(0.5),
-                    ),
-                  ),
+                  child: Text(unit!,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: highlight
+                            ? Colors.white70
+                            : theme.colorScheme.onSurface.withOpacity(0.5),
+                      )),
                 ),
               ],
             ],
@@ -548,7 +533,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
       final projectId = widget.session.projectId;
       Future.wait([
         context.read<ProjectProvider>().fetchTasks(projectId),
-        context.read<ProjectProvider>().fetchNotes(widget.session.id, 'session'),
+        context.read<ProjectProvider>()
+            .fetchNotes(widget.session.id, 'session'),
       ]);
     });
   }
@@ -564,8 +550,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.errorColor),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('End Session'),
           ),
@@ -613,20 +599,35 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
     }
   }
 
-  // FIX: async — always fetches tasks before opening the sheet so the list
-  // is never empty due to a race between initState fetch and the user tapping.
   Future<void> _showTaskLinkSheet(
       BuildContext context, SessionModel session) async {
+    // Always fetch fresh so we get all project tasks
     await context.read<ProjectProvider>().fetchTasks(session.projectId);
     if (!context.mounted) return;
+
     final tasks =
         context.read<ProjectProvider>().tasksForProject(session.projectId);
+
     if (tasks.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No tasks in this project yet')),
+      // Project has no tasks — explain and offer to go create one
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('No Tasks Yet'),
+          content: const Text(
+              'This project has no tasks. Go to Projects and add tasks first, then you can link them to this session.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
       );
       return;
     }
+
+    if (!context.mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -651,7 +652,6 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
         .toList();
     final notes = projectProv.notesForParent(session.id);
 
-    // If session was stopped, close focus mode
     if (!sessionProv.hasActiveSession) {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => Navigator.maybePop(context));
@@ -671,7 +671,6 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // ── Timer block ────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
               child: Column(
@@ -697,8 +696,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                         label: Text(isPaused ? 'Resume' : 'Pause'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.warningColor,
-                          side: const BorderSide(
-                              color: AppTheme.warningColor),
+                          side: const BorderSide(color: AppTheme.warningColor),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 20, vertical: 12),
                         ),
@@ -706,8 +704,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                       const SizedBox(width: 12),
                       ElevatedButton.icon(
                         onPressed: _confirmStop,
-                        icon: const Icon(Icons.stop_circle_outlined,
-                            size: 18),
+                        icon: const Icon(Icons.stop_circle_outlined, size: 18),
                         label: const Text('End Session'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.errorColor,
@@ -723,7 +720,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
             ),
             const Divider(height: 1),
 
-            // ── Tasks ───────────────────────────────────────────────────
+            // ── Tasks ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Row(
@@ -732,7 +729,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                       style: theme.textTheme.labelMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         letterSpacing: 1.2,
-                        color: theme.colorScheme.onSurface.withOpacity(0.5),
+                        color:
+                            theme.colorScheme.onSurface.withOpacity(0.5),
                       )),
                   const Spacer(),
                   TextButton.icon(
@@ -749,8 +747,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
             ),
             if (linkedTasks.isEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Text(
                   'No tasks linked — tap "Add task" to link tasks.',
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -762,7 +760,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
               ...linkedTasks.map((t) => _TaskCard(task: t)),
             const Divider(height: 24),
 
-            // ── Notes ───────────────────────────────────────────────────
+            // ── Notes ───────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Row(
@@ -771,7 +769,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                       style: theme.textTheme.labelMedium?.copyWith(
                         fontWeight: FontWeight.w700,
                         letterSpacing: 1.2,
-                        color: theme.colorScheme.onSurface.withOpacity(0.5),
+                        color:
+                            theme.colorScheme.onSurface.withOpacity(0.5),
                       )),
                   const Spacer(),
                   TextButton.icon(
@@ -788,8 +787,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
             ),
             if (notes.isEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Text(
                   'No notes yet — jot something down.',
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -836,13 +835,13 @@ class _StatusBadge extends StatelessWidget {
               width: 6,
               height: 6,
               margin: const EdgeInsets.only(right: 6),
-              decoration:
-                  BoxDecoration(color: color, shape: BoxShape.circle),
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
           if (isPaused)
             const Padding(
               padding: EdgeInsets.only(right: 4),
-              child: Icon(Icons.pause, size: 12, color: AppTheme.warningColor),
+              child: Icon(Icons.pause,
+                  size: 12, color: AppTheme.warningColor),
             ),
           Text(
             isPaused ? 'PAUSED' : 'ACTIVE',
@@ -867,9 +866,7 @@ class _LargeTimer extends StatefulWidget {
   final Duration? frozenDuration;
 
   const _LargeTimer(
-      {required this.session,
-      required this.isPaused,
-      this.frozenDuration});
+      {required this.session, required this.isPaused, this.frozenDuration});
 
   @override
   State<_LargeTimer> createState() => _LargeTimerState();
@@ -919,14 +916,9 @@ class _LargeTimerState extends State<_LargeTimer> {
         ? '${h.toString().padLeft(2, '0')}h ${m.toString().padLeft(2, '0')}m ${s.toString().padLeft(2, '0')}s'
         : '${m.toString().padLeft(2, '0')}m ${s.toString().padLeft(2, '0')}s';
 
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 52,
-        fontWeight: FontWeight.w800,
-        letterSpacing: -1.5,
-      ),
-    );
+    return Text(text,
+        style: const TextStyle(
+            fontSize: 52, fontWeight: FontWeight.w800, letterSpacing: -1.5));
   }
 }
 
@@ -945,8 +937,8 @@ class _TaskCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: theme.colorScheme.onSurface.withOpacity(0.08)),
+        border:
+            Border.all(color: theme.colorScheme.onSurface.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -958,7 +950,8 @@ class _TaskCard extends StatelessWidget {
             const SizedBox(height: 2),
             Text(task.description,
                 style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.5))),
+                    color:
+                        theme.colorScheme.onSurface.withOpacity(0.5))),
           ],
         ],
       ),
@@ -982,8 +975,8 @@ class _NoteCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: theme.colorScheme.onSurface.withOpacity(0.08)),
+        border:
+            Border.all(color: theme.colorScheme.onSurface.withOpacity(0.08)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1110,13 +1103,13 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
             const SizedBox(height: 4),
             Text('Select a project to track time for',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.6))),
+                    color:
+                        theme.colorScheme.onSurface.withOpacity(0.6))),
             const SizedBox(height: 16),
             ...widget.projects.map((p) => RadioListTile<String>(
                   title: Text(p.title),
-                  subtitle: p.description.isNotEmpty
-                      ? Text(p.description)
-                      : null,
+                  subtitle:
+                      p.description.isNotEmpty ? Text(p.description) : null,
                   value: p.id,
                   groupValue: _selectedId,
                   onChanged: (v) => setState(() => _selectedId = v),
@@ -1143,12 +1136,11 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
                           setState(() => _loading = false);
                           final err =
                               context.read<SessionProvider>().error;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(err ?? 'Failed to start session'),
-                              backgroundColor: AppTheme.errorColor,
-                            ),
-                          );
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content:
+                                Text(err ?? 'Failed to start session'),
+                            backgroundColor: AppTheme.errorColor,
+                          ));
                         }
                       },
                 child: _loading
@@ -1214,12 +1206,10 @@ class _TaskLinkSheetState extends State<_TaskLinkSheet> {
                 title: Text(t.name,
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(fontWeight: FontWeight.w600)),
-                subtitle: t.description.isNotEmpty
-                    ? Text(t.description)
-                    : null,
+                subtitle:
+                    t.description.isNotEmpty ? Text(t.description) : null,
                 controlAffinity: ListTileControlAffinity.leading,
                 onChanged: (val) async {
-                  // FIX: optimistic — update checkbox immediately, revert on failure
                   setState(() {
                     if (val == true) _linked.add(t.id);
                     else _linked.remove(t.id);

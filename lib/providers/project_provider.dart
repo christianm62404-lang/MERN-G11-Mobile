@@ -63,7 +63,7 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<ProjectModel?> createProject({
     required String title,
-    String description = '',
+    String description = '', // optional
   }) async {
     try {
       final info = await AuthService.instance.getUserInfo();
@@ -78,7 +78,9 @@ class ProjectProvider extends ChangeNotifier {
       final project = (map != null && map['title'] != null)
           ? ProjectModel.fromJson(map)
           : ProjectModel(
-              id: map?['insertedId']?.toString() ?? map?['_id']?.toString() ?? '',
+              id: map?['insertedId']?.toString() ??
+                  map?['_id']?.toString() ??
+                  '',
               title: title,
               description: description,
               userId: userId,
@@ -157,7 +159,11 @@ class ProjectProvider extends ChangeNotifier {
     try {
       final data = await ApiService.instance.post(
         ApiConstants.createTask,
-        body: {'projectId': projectId, 'name': name, 'description': description},
+        body: {
+          'projectId': projectId,
+          'name': name,
+          'description': description
+        },
       );
       final task = TaskModel.fromJson(data as Map<String, dynamic>);
       _tasksByProject[projectId] = [
@@ -233,6 +239,7 @@ class ProjectProvider extends ChangeNotifier {
     required String parentId,
     required String parentType,
   }) async {
+    // Optimistic: show the note immediately
     NoteParentType pt;
     switch (parentType) {
       case 'task':
@@ -252,13 +259,20 @@ class ProjectProvider extends ChangeNotifier {
       parentId: parentId,
       createdAt: DateTime.now(),
     );
-    _notesByParent[parentId] = [tempNote, ...(_notesByParent[parentId] ?? [])];
+    _notesByParent[parentId] = [
+      tempNote,
+      ...(_notesByParent[parentId] ?? [])
+    ];
     notifyListeners();
 
     try {
       final data = await ApiService.instance.post(
         ApiConstants.createNote,
-        body: {'content': content, 'parentId': parentId, 'parentType': parentType},
+        body: {
+          'content': content,
+          'parentId': parentId,
+          'parentType': parentType
+        },
       );
 
       NoteModel? realNote;
@@ -266,9 +280,6 @@ class ProjectProvider extends ChangeNotifier {
         realNote = NoteModel.fromJson(data);
       }
 
-      // Only replace the temp note if the server returned one with actual content.
-      // If the backend returned a minimal response (e.g. just insertedId),
-      // keep the temp note which already has the correct content.
       final list = List<NoteModel>.from(_notesByParent[parentId] ?? []);
       final idx = list.indexWhere((n) => n.id == tempId);
       if (realNote != null && realNote.content.isNotEmpty && idx != -1) {
@@ -276,6 +287,7 @@ class ProjectProvider extends ChangeNotifier {
       } else if (realNote != null && realNote.content.isNotEmpty) {
         list.insert(0, realNote);
       }
+      // Keep temp note when backend returns empty content (just insertedId)
       _notesByParent[parentId] = list;
       notifyListeners();
       return realNote ?? tempNote;

@@ -52,7 +52,8 @@ class MernG11App extends StatelessWidget {
       ],
       child: Builder(
         builder: (context) {
-          // Wire logout to clear other providers so data never leaks across accounts
+          // Wire up onLogout so both providers clear when the user logs out,
+          // preventing one user's data from leaking to the next.
           final auth = context.read<AuthProvider>();
           auth.onLogout = () {
             context.read<ProjectProvider>().clearData();
