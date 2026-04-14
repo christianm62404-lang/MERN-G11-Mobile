@@ -71,13 +71,11 @@ class SessionModel {
     return SessionModel(
       id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
       projectId: json['projectId']?.toString() ?? '',
-      // Convert backend time payloads to local timezone for correct display.
       startTime: _parseBackendDate(json['startTime']) ?? DateTime.now(),
       endTime: _parseBackendDate(json['endTime']),
       pausedAt: _parseBackendDate(json['pausedAt']),
       pausedDurationMs: pausedDurationMs,
       taskIds: tasks,
-      // Backend stores isPaused (camelCase); also accept legacy 'paused'
       isPaused: json['isPaused'] == true || json['paused'] == true,
     );
   }
@@ -90,19 +88,53 @@ class SessionModel {
     final parsed = DateTime.tryParse(str);
     if (parsed == null) return null;
 
-    // If the backend sends UTC without timezone suffix, treat as UTC.
     final hasZone = str.endsWith('Z') || RegExp(r'[+-]\d{2}:\d{2}$').hasMatch(str);
-    if (hasZone) return parsed.toLocal();
-    return DateTime.utc(
-      parsed.year,
-      parsed.month,
-      parsed.day,
-      parsed.hour,
-      parsed.minute,
-      parsed.second,
-      parsed.millisecond,
-      parsed.microsecond,
-    ).toLocal();
+    final utc = hasZone
+        ? parsed.toUtc()
+        : DateTime.utc(
+            parsed.year,
+            parsed.month,
+            parsed.day,
+            parsed.hour,
+            parsed.minute,
+            parsed.second,
+            parsed.millisecond,
+            parsed.microsecond,
+          );
+    return _utcToEasternWallClock(utc);
+  }
+
+  static DateTime _utcToEasternWallClock(DateTime utc) {
+    final year = utc.year;
+
+    DateTime nthWeekdayOfMonthUtc(int month, int weekday, int occurrence) {
+      final first = DateTime.utc(year, month, 1);
+      final delta = (weekday - first.weekday + 7) % 7;
+      final day = 1 + delta + (occurrence - 1) * 7;
+      return DateTime.utc(year, month, day);
+    }
+
+    // US Eastern DST boundaries (UTC instants):
+    // start: 2nd Sunday in March at 07:00 UTC
+    // end:   1st Sunday in November at 06:00 UTC
+    final dstStartDate = nthWeekdayOfMonthUtc(DateTime.march, DateTime.sunday, 2);
+    final dstEndDate = nthWeekdayOfMonthUtc(DateTime.november, DateTime.sunday, 1);
+    final dstStartUtc = DateTime.utc(year, 3, dstStartDate.day, 7);
+    final dstEndUtc = DateTime.utc(year, 11, dstEndDate.day, 6);
+
+    final isDst = !utc.isBefore(dstStartUtc) && utc.isBefore(dstEndUtc);
+    final easternUtc = utc.add(Duration(hours: isDst ? -4 : -5));
+
+    return DateTime(
+      easternUtc.year,
+      easternUtc.month,
+      easternUtc.day,
+      easternUtc.hour,
+      easternUtc.minute,
+      easternUtc.second,
+      easternUtc.millisecond,
+      easternUtc.microsecond,
+    );
   }
 
   SessionModel copyWith({
