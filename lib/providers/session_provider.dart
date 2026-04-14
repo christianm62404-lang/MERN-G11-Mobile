@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import '../models/session_model.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../utils/constants.dart';
 
@@ -55,7 +56,9 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void stopAndClear() {
     if (_activeSession != null) {
-      ApiService.instance.get(ApiConstants.stopSession).catchError((_) {});
+      ApiService.instance
+          .post(ApiConstants.stopSession, body: {'sessionId': _activeSession!.id})
+          .catchError((_) {});
     }
     clearData();
   }
@@ -80,8 +83,20 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      final data =
-          await ApiService.instance.get(ApiConstants.fetchManySessions);
+      final info = await AuthService.instance.getUserInfo();
+      final userId = info['userId'] ?? '';
+      final requestBody = <String, dynamic>{
+        if (userId.isNotEmpty) 'id': userId,
+        if (userId.isNotEmpty) 'userId': userId,
+        if (projectId != null && projectId.isNotEmpty) 'projectId': projectId,
+      };
+
+      final data = requestBody.isNotEmpty
+          ? await ApiService.instance.getWithBody(
+              ApiConstants.fetchManySessions,
+              body: requestBody,
+            )
+          : await ApiService.instance.get(ApiConstants.fetchManySessions);
 
       final list = data is List
           ? data
@@ -89,6 +104,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       final allSessions = (list as List)
           .map((e) => SessionModel.fromJson(e as Map<String, dynamic>))
+          .where((s) => projectId == null || s.projectId == projectId)
           .toList();
 
       allSessions.sort((a, b) => b.startTime.compareTo(a.startTime));
@@ -120,7 +136,12 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> fetchStatus() async {
     try {
-      final data = await ApiService.instance.get(ApiConstants.sessionStatus);
+      final data = await ApiService.instance.getWithBody(
+        ApiConstants.sessionStatus,
+        body: {
+          if (_activeSession != null) 'sessionId': _activeSession!.id,
+        },
+      );
       if (data is Map && data['session'] != null) {
         final session =
             SessionModel.fromJson(data['session'] as Map<String, dynamic>);
@@ -236,7 +257,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     await NotificationService.instance.cancelAllNotifications();
 
     try {
-      await ApiService.instance.get(ApiConstants.stopSession);
+      await ApiService.instance.post(
+        ApiConstants.stopSession,
+        body: {'sessionId': stoppingSession.id},
+      );
     } on ApiException catch (e) {
       _error = e.message;
       notifyListeners();
@@ -260,7 +284,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      final data = await ApiService.instance.get(ApiConstants.pauseSession);
+      final data = await ApiService.instance.post(
+        ApiConstants.pauseSession,
+        body: {'sessionId': _activeSession!.id},
+      );
       if (data != null && data is Map) {
         final updated = SessionModel.fromJson(data as Map<String, dynamic>);
         _activeSession = updated;
@@ -299,7 +326,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      final data = await ApiService.instance.get(ApiConstants.startSession);
+      final data = await ApiService.instance.post(
+        ApiConstants.startSession,
+        body: {'sessionId': _activeSession!.id},
+      );
       if (data != null && data is Map) {
         final updated = SessionModel.fromJson(data as Map<String, dynamic>);
         _activeSession = updated;
@@ -322,12 +352,13 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   // ── Task linking ────────────────────────────────────────────────────────────
 
-  Future<bool> addTaskToSession(String taskId) async {
+  Future<bool> addTaskToSession(String taskId, {String? sessionId}) async {
     if (_activeSession == null) return false;
+    final sid = sessionId ?? _activeSession!.id;
     try {
       await ApiService.instance.post(
         ApiConstants.addTaskToSession,
-        body: {'taskId': taskId},
+        body: {'taskId': taskId, 'sessionId': sid},
       );
       final updated = _activeSession!
           .copyWith(taskIds: [..._activeSession!.taskIds, taskId]);
@@ -347,12 +378,13 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> removeTaskFromSession(String taskId) async {
+  Future<bool> removeTaskFromSession(String taskId, {String? sessionId}) async {
     if (_activeSession == null) return false;
+    final sid = sessionId ?? _activeSession!.id;
     try {
       await ApiService.instance.post(
         ApiConstants.removeTaskFromSession,
-        body: {'taskId': taskId},
+        body: {'taskId': taskId, 'sessionId': sid},
       );
       final updated = _activeSession!.copyWith(
           taskIds:
@@ -442,6 +474,30 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void clearError() {
     _error = null;
+    notifyListeners();
+  }
+
+  void reconcileWithProjectIds(Set<String> projectIds) {
+    if (projectIds.isEmpty) {
+      _sessions = [];
+      _activeSession = null;
+      _activeProjectTitle = null;
+      _frozenDuration = null;
+      _sessionTimer?.cancel();
+      _sessionTimer = null;
+      notifyListeners();
+      return;
+    }
+
+    _sessions = _sessions.where((s) => projectIds.contains(s.projectId)).toList();
+    if (_activeSession != null &&
+        !projectIds.contains(_activeSession!.projectId)) {
+      _activeSession = null;
+      _activeProjectTitle = null;
+      _frozenDuration = null;
+      _sessionTimer?.cancel();
+      _sessionTimer = null;
+    }
     notifyListeners();
   }
 }
