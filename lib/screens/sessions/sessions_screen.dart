@@ -26,10 +26,13 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   Future<void> _loadData() async {
-    await Future.wait([
-      context.read<SessionProvider>().fetchSessions(),
-      context.read<ProjectProvider>().fetchProjects(),
-    ]);
+    final projectsProv = context.read<ProjectProvider>();
+    final sessionsProv = context.read<SessionProvider>();
+    await projectsProv.fetchProjects();
+    await sessionsProv.fetchSessions();
+    await sessionsProv.reconcileWithProjectIds(
+      projectsProv.projects.map((p) => p.id).toSet(),
+    );
   }
 
   void _showStartDialog() {
@@ -651,10 +654,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
 
     final session = sessionProv.activeSession ?? widget.session;
     final isPaused = sessionProv.isPaused;
-    final linkedTasks = projectProv
-        .tasksForProject(session.projectId)
-        .where((t) => session.taskIds.contains(t.id))
-        .toList();
+    final allProjectTasks = projectProv.tasksForProject(session.projectId);
     final notes = projectProv.notesForParent(session.id);
 
     if (!sessionProv.hasActiveSession) {
@@ -736,32 +736,38 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                         color:
                             theme.colorScheme.onSurface.withOpacity(0.5),
                       )),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: () => _showTaskLinkSheet(context, session),
-                    icon: const Icon(Icons.add, size: 15),
-                    label: const Text('Add task'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryColor,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
                 ],
               ),
             ),
-            if (linkedTasks.isEmpty)
+            if (allProjectTasks.isEmpty)
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Text(
-                  'No tasks linked — tap "Add task" to link tasks.',
+                  'No tasks for this project yet.',
                   style: theme.textTheme.bodySmall?.copyWith(
                       color:
                           theme.colorScheme.onSurface.withOpacity(0.4)),
                 ),
               )
             else
-              ...linkedTasks.map((t) => _TaskCard(task: t)),
+              ...allProjectTasks.map((t) => CheckboxListTile(
+                    value: session.taskIds.contains(t.id),
+                    onChanged: (checked) async {
+                      if (checked == null) return;
+                      await context.read<SessionProvider>().setTaskChecked(
+                            sessionId: session.id,
+                            taskId: t.id,
+                            isChecked: checked,
+                          );
+                    },
+                    title: Text(t.name),
+                    subtitle:
+                        t.description.isNotEmpty ? Text(t.description) : null,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  )),
             const Divider(height: 24),
 
             Padding(
@@ -1234,8 +1240,14 @@ class _TaskLinkSheetState extends State<_TaskLinkSheet> {
                   bool ok;
                   try {
                     ok = val
-                        ? await sp.addTaskToSession(t.id)
-                        : await sp.removeTaskFromSession(t.id);
+                        ? await sp.addTaskToSession(
+                            t.id,
+                            sessionId: widget.session.id,
+                          )
+                        : await sp.removeTaskFromSession(
+                            t.id,
+                            sessionId: widget.session.id,
+                          );
                   } catch (_) {
                     ok = false;
                   }

@@ -41,12 +41,34 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  UserModel _userFromToken(String token) {
+  UserModel _userFromToken(
+    String token, {
+    String? fallbackEmail,
+    String? fallbackUserId,
+    String? fallbackFirstName,
+  }) {
     final payload = JwtDecoder.decode(token);
+    final resolvedId = payload['userId']?.toString().trim().isNotEmpty == true
+        ? payload['userId'].toString().trim()
+        : payload['_id']?.toString().trim().isNotEmpty == true
+            ? payload['_id'].toString().trim()
+            : payload['id']?.toString().trim().isNotEmpty == true
+                ? payload['id'].toString().trim()
+                : payload['sub']?.toString().trim().isNotEmpty == true
+                    ? payload['sub'].toString().trim()
+                    : (fallbackUserId ?? '').trim();
+    final resolvedEmail = payload['email']?.toString().trim().isNotEmpty == true
+        ? payload['email'].toString().trim()
+        : (fallbackEmail ?? '').trim();
+    final resolvedFirstName =
+        payload['firstName']?.toString().trim().isNotEmpty == true
+            ? payload['firstName'].toString().trim()
+            : (fallbackFirstName ?? '').trim();
+
     return UserModel(
-      id: payload['userId']?.toString() ?? '',
-      email: payload['email']?.toString() ?? '',
-      firstName: payload['firstName']?.toString() ?? '',
+      id: resolvedId,
+      email: resolvedEmail,
+      firstName: resolvedFirstName,
       verified: true,
       createdAt: DateTime.now(),
     );
@@ -70,7 +92,7 @@ class AuthProvider extends ChangeNotifier {
       }
 
       await AuthService.instance.saveToken(token);
-      _user = _userFromToken(token);
+      _user = _userFromToken(token, fallbackEmail: email);
       await AuthService.instance.saveUserInfo(
         userId: _user!.id,
         email: _user!.email,
