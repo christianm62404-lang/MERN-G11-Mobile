@@ -26,10 +26,13 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   Future<void> _loadData() async {
-    await Future.wait([
-      context.read<SessionProvider>().fetchSessions(),
-      context.read<ProjectProvider>().fetchProjects(),
-    ]);
+    final projectsProv = context.read<ProjectProvider>();
+    final sessionsProv = context.read<SessionProvider>();
+    await projectsProv.fetchProjects();
+    await sessionsProv.fetchSessions();
+    sessionsProv.reconcileWithProjectIds(
+      projectsProv.projects.map((p) => p.id).toSet(),
+    );
   }
 
   void _showStartDialog() {
@@ -1234,8 +1237,14 @@ class _TaskLinkSheetState extends State<_TaskLinkSheet> {
                   bool ok;
                   try {
                     ok = val
-                        ? await sp.addTaskToSession(t.id)
-                        : await sp.removeTaskFromSession(t.id);
+                        ? await sp.addTaskToSession(
+                            t.id,
+                            sessionId: widget.session.id,
+                          )
+                        : await sp.removeTaskFromSession(
+                            t.id,
+                            sessionId: widget.session.id,
+                          );
                   } catch (_) {
                     ok = false;
                   }
