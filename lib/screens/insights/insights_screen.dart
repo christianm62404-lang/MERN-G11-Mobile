@@ -22,10 +22,13 @@ class _InsightsScreenState extends State<InsightsScreen> {
   }
 
   Future<void> _loadData() async {
-    await Future.wait([
-      context.read<SessionProvider>().fetchSessions(),
-      context.read<ProjectProvider>().fetchProjects(),
-    ]);
+    final projectsProv = context.read<ProjectProvider>();
+    final sessionsProv = context.read<SessionProvider>();
+    await projectsProv.fetchProjects();
+    await sessionsProv.fetchSessions();
+    sessionsProv.reconcileWithProjectIds(
+      projectsProv.projects.map((p) => p.id).toSet(),
+    );
   }
 
   @override
