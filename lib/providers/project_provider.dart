@@ -1,3 +1,4 @@
+// lib/providers/project_provider.dart
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -38,6 +39,8 @@ class ProjectProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Projects ──────────────────────────────────────────────────
+
   Future<void> fetchProjects() async {
     _isLoading = true;
     _error = null;
@@ -51,6 +54,7 @@ class ProjectProvider extends ChangeNotifier {
         await _restoreFromCache(_currentAccountKey!);
       }
 
+      // Some backend deployments expect userId in body even on fetch routes.
       final data = userId.isNotEmpty
           ? await ApiService.instance.getWithBody(
               ApiConstants.fetchManyProjects,
@@ -68,7 +72,7 @@ class ProjectProvider extends ChangeNotifier {
       }
     } on ApiException catch (e) {
       _error = e.message;
-    } catch (_) {
+    } catch (e) {
       _error = 'Failed to load projects';
     } finally {
       _isLoading = false;
@@ -80,17 +84,24 @@ class ProjectProvider extends ChangeNotifier {
     required String title,
     String description = '',
   }) async {
-    try {
-      final info = await AuthService.instance.getUserInfo();
-      final userId = info['userId'] ?? '';
+    final info = await AuthService.instance.getUserInfo();
+    final userId = info['userId'] ?? '';
+    final fallbackProject = ProjectModel(
+      id: 'local_${DateTime.now().millisecondsSinceEpoch}',
+      title: title,
+      description: description,
+      userId: userId,
+      createdAt: DateTime.now(),
+    );
 
+    try {
       final data = await ApiService.instance.post(
         ApiConstants.createProject,
         body: {
           'title': title,
-          'description': description, // optional; empty string allowed
           'id': userId,
           'userId': userId,
+          if (description.trim().isNotEmpty) 'description': description.trim(),
         },
       );
 
@@ -110,12 +121,22 @@ class ProjectProvider extends ChangeNotifier {
       return project;
     } on ApiException catch (e) {
       _error = e.message;
+      // Allow optional-description and offline flows by saving locally.
+      _projects.insert(0, fallbackProject);
+      await _persistToCache();
       notifyListeners();
-      return null;
+      return fallbackProject;
+    } catch (_) {
+      // Allow optional-description and offline flows by saving locally.
+      _projects.insert(0, fallbackProject);
+      await _persistToCache();
+      notifyListeners();
+      return fallbackProject;
     }
   }
 
-  Future<bool> updateProject(String id, {String? title, String? description}) async {
+  Future<bool> updateProject(String id,
+      {String? title, String? description}) async {
     try {
       final update = <String, dynamic>{};
       if (title != null) update['title'] = title;
@@ -141,7 +162,8 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<bool> deleteProject(String id) async {
     try {
-      await ApiService.instance.delete(ApiConstants.deleteProject, body: {'id': id});
+      await ApiService.instance
+          .delete(ApiConstants.deleteProject, body: {'id': id});
       _projects.removeWhere((p) => p.id == id);
       _tasksByProject.remove(id);
       await _persistToCache();
@@ -153,6 +175,8 @@ class ProjectProvider extends ChangeNotifier {
       return false;
     }
   }
+
+  // ── Tasks ─────────────────────────────────────────────────────
 
   Future<void> fetchTasks(String projectId) async {
     try {
@@ -166,7 +190,9 @@ class ProjectProvider extends ChangeNotifier {
           .toList();
       await _persistToCache();
       notifyListeners();
-    } catch (_) {}
+    } catch (_) {
+      // Keep existing tasks on failure
+    }
   }
 
   Future<TaskModel?> createTask({
@@ -180,7 +206,10 @@ class ProjectProvider extends ChangeNotifier {
         body: {'projectId': projectId, 'name': name, 'description': description},
       );
       final task = TaskModel.fromJson(data as Map<String, dynamic>);
-      _tasksByProject[projectId] = [task, ...(_tasksByProject[projectId] ?? [])];
+      _tasksByProject[projectId] = [
+        task,
+        ...(_tasksByProject[projectId] ?? [])
+      ];
       await _persistToCache();
       notifyListeners();
       return task;
@@ -219,7 +248,8 @@ class ProjectProvider extends ChangeNotifier {
 
   Future<bool> deleteTask(String taskId, String projectId) async {
     try {
-      await ApiService.instance.delete(ApiConstants.deleteTask, body: {'id': taskId});
+      await ApiService.instance
+          .delete(ApiConstants.deleteTask, body: {'id': taskId});
       _tasksByProject[projectId]?.removeWhere((t) => t.id == taskId);
       await _persistToCache();
       notifyListeners();
@@ -230,6 +260,8 @@ class ProjectProvider extends ChangeNotifier {
       return false;
     }
   }
+
+  // ── Notes ─────────────────────────────────────────────────────
 
   Future<void> fetchNotes(String parentId, String parentType) async {
     try {
@@ -296,26 +328,49 @@ class ProjectProvider extends ChangeNotifier {
       await _persistToCache();
       notifyListeners();
       return realNote ?? tempNote;
-    } on ApiException catch (_) {
+    } on ApiException catch (e) {
       _notesByParent[parentId]?.removeWhere((n) => n.id == tempId);
       await _persistToCache();
+      _error = e.message;
+      notifyListeners();
       return null;
-    } catch (_) {
+    } catch (e) {
       _notesByParent[parentId]?.removeWhere((n) => n.id == tempId);
       await _persistToCache();
+      _error = 'Failed to save note';
+      notifyListeners();
       return null;
     }
   }
 
   Future<bool> deleteNote(String noteId, String parentId) async {
+    final existing = List<NoteModel>.from(_notesByParent[parentId] ?? []);
+    _notesByParent[parentId] = existing.where((n) => n.id != noteId).toList();
+    await _persistToCache();
+    notifyListeners();
+
     try {
-      await ApiService.instance.delete(ApiConstants.deleteNote, body: {'id': noteId});
-      _notesByParent[parentId]?.removeWhere((n) => n.id == noteId);
-      await _persistToCache();
-      notifyListeners();
+      try {
+        await ApiService.instance
+            .delete(ApiConstants.deleteNote, body: {'id': noteId});
+      } on ApiException {
+        // Compatibility for backends expecting a different payload shape.
+        await ApiService.instance.delete(
+          ApiConstants.deleteNote,
+          body: {'noteId': noteId, '_id': noteId},
+        );
+      }
       return true;
     } on ApiException catch (e) {
+      _notesByParent[parentId] = existing;
+      await _persistToCache();
       _error = e.message;
+      notifyListeners();
+      return false;
+    } catch (_) {
+      _notesByParent[parentId] = existing;
+      await _persistToCache();
+      _error = 'Failed to delete note';
       notifyListeners();
       return false;
     }

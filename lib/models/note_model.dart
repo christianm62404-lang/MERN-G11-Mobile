@@ -49,4 +49,14 @@ class NoteModel {
         return 'project';
     }
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      '_id': id,
+      'content': content,
+      'parentType': parentTypeString,
+      'parentId': parentId,
+      'createdAt': createdAt.toIso8601String(),
+    };
+  }
 }

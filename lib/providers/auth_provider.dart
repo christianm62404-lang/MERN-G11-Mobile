@@ -1,3 +1,4 @@
+// lib/providers/auth_provider.dart
 import 'package:flutter/foundation.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 import '../models/user_model.dart';
@@ -41,12 +42,34 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  UserModel _userFromToken(String token) {
+  UserModel _userFromToken(
+    String token, {
+    String? fallbackEmail,
+    String? fallbackUserId,
+    String? fallbackFirstName,
+  }) {
     final payload = JwtDecoder.decode(token);
+    final resolvedId = payload['userId']?.toString().trim().isNotEmpty == true
+        ? payload['userId'].toString().trim()
+        : payload['_id']?.toString().trim().isNotEmpty == true
+            ? payload['_id'].toString().trim()
+            : payload['id']?.toString().trim().isNotEmpty == true
+                ? payload['id'].toString().trim()
+                : payload['sub']?.toString().trim().isNotEmpty == true
+                    ? payload['sub'].toString().trim()
+                    : (fallbackUserId ?? '').trim();
+    final resolvedEmail = payload['email']?.toString().trim().isNotEmpty == true
+        ? payload['email'].toString().trim()
+        : (fallbackEmail ?? '').trim();
+    final resolvedFirstName =
+        payload['firstName']?.toString().trim().isNotEmpty == true
+            ? payload['firstName'].toString().trim()
+            : (fallbackFirstName ?? '').trim();
+
     return UserModel(
-      id: payload['userId']?.toString() ?? '',
-      email: payload['email']?.toString() ?? '',
-      firstName: payload['firstName']?.toString() ?? '',
+      id: resolvedId,
+      email: resolvedEmail,
+      firstName: resolvedFirstName,
       verified: true,
       createdAt: DateTime.now(),
     );
@@ -62,15 +85,17 @@ class AuthProvider extends ChangeNotifier {
         ApiConstants.loginUser,
         body: {'email': email, 'password': password},
         requireAuth: false,
-      ) as Map<String, dynamic>?;
+      );
 
-      final token = data?['token'] as String?;
+      final map = data is Map<String, dynamic> ? data : <String, dynamic>{};
+
+      final token = map['token']?.toString();
       if (token == null || token.isEmpty) {
-        throw ApiException('No token received');
+        throw ApiException('Invalid email or password');
       }
 
       await AuthService.instance.saveToken(token);
-      _user = _userFromToken(token);
+      _user = _userFromToken(token, fallbackEmail: email);
       await AuthService.instance.saveUserInfo(
         userId: _user!.id,
         email: _user!.email,
@@ -89,7 +114,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'An unexpected error occurred';
+      _errorMessage = _friendlyError(e, fallback: 'Login failed');
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return false;
@@ -122,7 +147,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e) {
-      _errorMessage = 'An unexpected error occurred';
+      _errorMessage = _friendlyError(e, fallback: 'Registration failed');
       notifyListeners();
       return false;
     } finally {
@@ -208,5 +233,31 @@ class AuthProvider extends ChangeNotifier {
   void setUnverified() {
     _status = AuthStatus.unverified;
     notifyListeners();
+  }
+
+  String _friendlyError(Object error, {required String fallback}) {
+    final raw = error.toString().trim();
+    if (raw.isEmpty) return fallback;
+
+    final cleaned = raw
+        .replaceFirst('Exception: ', '')
+        .replaceFirst('ApiException: ', '')
+        .trim();
+
+    final lower = cleaned.toLowerCase();
+    if (lower.contains('401') ||
+        lower.contains('unauthorized') ||
+        lower.contains('invalid credentials') ||
+        lower.contains('invalid email') ||
+        lower.contains('invalid password')) {
+      return 'Invalid email or password';
+    }
+    if (lower.contains('email already') || lower.contains('already exists')) {
+      return 'Email already exists';
+    }
+    if (lower.contains('network') || lower.contains('socket')) {
+      return 'Network error. Please check your connection.';
+    }
+    return cleaned.isEmpty ? fallback : cleaned;
   }
 }
