@@ -71,38 +71,22 @@ class SessionModel {
     return SessionModel(
       id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
       projectId: json['projectId']?.toString() ?? '',
-      // Convert backend time payloads to local timezone for correct display.
-      startTime: _parseBackendDate(json['startTime']) ?? DateTime.now(),
-      endTime: _parseBackendDate(json['endTime']),
-      pausedAt: _parseBackendDate(json['pausedAt']),
+      // .toLocal() converts UTC backend times to device timezone (e.g. EDT)
+      startTime: json['startTime'] != null
+          ? (DateTime.tryParse(json['startTime'].toString())?.toLocal()) ??
+              DateTime.now()
+          : DateTime.now(),
+      endTime: json['endTime'] != null
+          ? DateTime.tryParse(json['endTime'].toString())?.toLocal()
+          : null,
+      pausedAt: json['pausedAt'] != null
+          ? DateTime.tryParse(json['pausedAt'].toString())?.toLocal()
+          : null,
       pausedDurationMs: pausedDurationMs,
       taskIds: tasks,
       // Backend stores isPaused (camelCase); also accept legacy 'paused'
       isPaused: json['isPaused'] == true || json['paused'] == true,
     );
-  }
-
-  static DateTime? _parseBackendDate(dynamic raw) {
-    if (raw == null) return null;
-    final str = raw.toString().trim();
-    if (str.isEmpty) return null;
-
-    final parsed = DateTime.tryParse(str);
-    if (parsed == null) return null;
-
-    // If the backend sends UTC without timezone suffix, treat as UTC.
-    final hasZone = str.endsWith('Z') || RegExp(r'[+-]\d{2}:\d{2}$').hasMatch(str);
-    if (hasZone) return parsed.toLocal();
-    return DateTime.utc(
-      parsed.year,
-      parsed.month,
-      parsed.day,
-      parsed.hour,
-      parsed.minute,
-      parsed.second,
-      parsed.millisecond,
-      parsed.microsecond,
-    ).toLocal();
   }
 
   SessionModel copyWith({

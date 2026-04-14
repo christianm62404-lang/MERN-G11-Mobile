@@ -39,16 +39,9 @@ class ProjectProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final info = await AuthService.instance.getUserInfo();
-      final userId = info['userId'] ?? '';
-
-      // Some backend deployments expect userId in body even on fetch routes.
-      final data = userId.isNotEmpty
-          ? await ApiService.instance.getWithBody(
-              ApiConstants.fetchManyProjects,
-              body: {'id': userId, 'userId': userId},
-            )
-          : await ApiService.instance.get(ApiConstants.fetchManyProjects);
+      // Backend reads userId from the JWT — no body needed.
+      final data =
+          await ApiService.instance.get(ApiConstants.fetchManyProjects);
 
       final list = _asList(data);
       _projects = list
@@ -74,12 +67,7 @@ class ProjectProvider extends ChangeNotifier {
 
       final data = await ApiService.instance.post(
         ApiConstants.createProject,
-        body: {
-          'title': title,
-          if (description.trim().isNotEmpty) 'description': description,
-          'id': userId,
-          'userId': userId,
-        },
+        body: {'title': title, 'description': description, 'id': userId},
       );
 
       final map = data as Map<String, dynamic>?;
