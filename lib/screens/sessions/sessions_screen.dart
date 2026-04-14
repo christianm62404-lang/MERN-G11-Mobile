@@ -30,7 +30,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
     final sessionsProv = context.read<SessionProvider>();
     await projectsProv.fetchProjects();
     await sessionsProv.fetchSessions();
-    sessionsProv.reconcileWithProjectIds(
+    await sessionsProv.reconcileWithProjectIds(
       projectsProv.projects.map((p) => p.id).toSet(),
     );
   }
@@ -609,43 +609,6 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
     }
   }
 
-  Future<void> _showTaskLinkSheet(
-      BuildContext context, SessionModel session) async {
-    await context.read<ProjectProvider>().fetchTasks(session.projectId);
-    if (!context.mounted) return;
-
-    final tasks =
-        context.read<ProjectProvider>().tasksForProject(session.projectId);
-
-    if (tasks.isEmpty) {
-      await showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('No Tasks Yet'),
-          content: const Text(
-              'This project has no tasks. Go to Projects and add tasks first, then you can link them to this session.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    if (!context.mounted) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => _TaskLinkSheet(session: session, tasks: tasks),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final sessionProv = context.watch<SessionProvider>();
@@ -654,10 +617,7 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
 
     final session = sessionProv.activeSession ?? widget.session;
     final isPaused = sessionProv.isPaused;
-    final linkedTasks = projectProv
-        .tasksForProject(session.projectId)
-        .where((t) => session.taskIds.contains(t.id))
-        .toList();
+    final allProjectTasks = projectProv.tasksForProject(session.projectId);
     final notes = projectProv.notesForParent(session.id);
 
     if (!sessionProv.hasActiveSession) {
@@ -739,32 +699,38 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                         color:
                             theme.colorScheme.onSurface.withOpacity(0.5),
                       )),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: () => _showTaskLinkSheet(context, session),
-                    icon: const Icon(Icons.add, size: 15),
-                    label: const Text('Add task'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.primaryColor,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
                 ],
               ),
             ),
-            if (linkedTasks.isEmpty)
+            if (allProjectTasks.isEmpty)
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Text(
-                  'No tasks linked — tap "Add task" to link tasks.',
+                  'No tasks for this project yet.',
                   style: theme.textTheme.bodySmall?.copyWith(
                       color:
                           theme.colorScheme.onSurface.withOpacity(0.4)),
                 ),
               )
             else
-              ...linkedTasks.map((t) => _TaskCard(task: t)),
+              ...allProjectTasks.map((t) => CheckboxListTile(
+                    value: session.taskIds.contains(t.id),
+                    onChanged: (checked) async {
+                      if (checked == null) return;
+                      await context.read<SessionProvider>().setTaskChecked(
+                            sessionId: session.id,
+                            taskId: t.id,
+                            isChecked: checked,
+                          );
+                    },
+                    title: Text(t.name),
+                    subtitle:
+                        t.description.isNotEmpty ? Text(t.description) : null,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 16),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  )),
             const Divider(height: 24),
 
             Padding(
@@ -1162,112 +1128,6 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white))
                     : const Text('Start Tracking'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Task link sheet ───────────────────────────────────────────────────────────
-
-class _TaskLinkSheet extends StatefulWidget {
-  final SessionModel session;
-  final List<TaskModel> tasks;
-
-  const _TaskLinkSheet({required this.session, required this.tasks});
-
-  @override
-  State<_TaskLinkSheet> createState() => _TaskLinkSheetState();
-}
-
-class _TaskLinkSheetState extends State<_TaskLinkSheet> {
-  late Set<String> _linked;
-
-  @override
-  void initState() {
-    super.initState();
-    _linked = widget.session.taskIds.toSet();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Link Tasks',
-                style: theme.textTheme.titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text('Check the tasks you worked on',
-                style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.55))),
-            const SizedBox(height: 16),
-            ...widget.tasks.map((t) {
-              final isLinked = _linked.contains(t.id);
-              return CheckboxListTile(
-                value: isLinked,
-                contentPadding: EdgeInsets.zero,
-                title: Text(t.name,
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(fontWeight: FontWeight.w600)),
-                subtitle:
-                    t.description.isNotEmpty ? Text(t.description) : null,
-                controlAffinity: ListTileControlAffinity.leading,
-                onChanged: (val) async {
-                  if (val == null) return;
-
-                  // Optimistic flip
-                  setState(() {
-                    if (val) {
-                      _linked.add(t.id);
-                    } else {
-                      _linked.remove(t.id);
-                    }
-                  });
-
-                  final sp = context.read<SessionProvider>();
-                  bool ok;
-                  try {
-                    ok = val
-                        ? await sp.addTaskToSession(
-                            t.id,
-                            sessionId: widget.session.id,
-                          )
-                        : await sp.removeTaskFromSession(
-                            t.id,
-                            sessionId: widget.session.id,
-                          );
-                  } catch (_) {
-                    ok = false;
-                  }
-
-                  // Revert on failure
-                  if (!ok && mounted) {
-                    setState(() {
-                      if (val) {
-                        _linked.remove(t.id);
-                      } else {
-                        _linked.add(t.id);
-                      }
-                    });
-                  }
-                },
-              );
-            }),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Done'),
               ),
             ),
           ],

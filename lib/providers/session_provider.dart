@@ -1,3 +1,4 @@
+// lib/providers/session_provider.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -22,6 +23,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? _error;
   Timer? _sessionTimer;
 
+  // Guards against concurrent startSession calls
   bool _isStarting = false;
   String? _currentAccountKey;
 
@@ -31,6 +33,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasActiveSession => _activeSession != null;
+
   bool get isPaused => _activeSession?.isPaused ?? false;
   Duration? get frozenDuration => _frozenDuration;
 
@@ -38,11 +41,16 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
   }
 
+  /// On mobile only: sync with backend when returning to foreground.
+  /// On web, tab-switch fires this event — skipping it prevents the
+  /// active session from being cleared by a stale backend response.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!kIsWeb && state == AppLifecycleState.resumed) {
       fetchStatus();
     }
+    // NEVER call stopSession() here. Sessions only end when the user
+    // explicitly stops them or signs out.
   }
 
   @override
@@ -51,6 +59,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     _sessionTimer?.cancel();
     super.dispose();
   }
+
+  // ── Lifecycle helpers ───────────────────────────────────────────────────────
 
   void stopAndClear() {
     if (_activeSession != null) {
@@ -71,6 +81,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     _sessionTimer = null;
     notifyListeners();
   }
+
+  // ── Fetch ───────────────────────────────────────────────────────────────────
 
   Future<void> fetchSessions({String? projectId}) async {
     _isLoading = true;
@@ -97,7 +109,9 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
             )
           : await ApiService.instance.get(ApiConstants.fetchManySessions);
 
-      final list = data is List ? data : (data is Map ? (data['sessions'] ?? []) : []);
+      final list = data is List
+          ? data
+          : (data is Map ? (data['sessions'] ?? []) : []);
 
       final allSessions = (list as List)
           .map((e) => SessionModel.fromJson(e as Map<String, dynamic>))
@@ -110,8 +124,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       if (_activeSession == null) {
-        final running = _sessions.where((s) => s.isActive && !s.isPaused).toList();
-        final paused = _sessions.where((s) => s.isActive && s.isPaused).toList();
+        final running =
+            _sessions.where((s) => s.isActive && !s.isPaused).toList();
+        final paused =
+            _sessions.where((s) => s.isActive && s.isPaused).toList();
 
         if (running.isNotEmpty) {
           _activeSession = running.first;
@@ -124,7 +140,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _persistToCache();
     } on ApiException catch (e) {
       _error = e.message;
-    } catch (_) {
+    } catch (e) {
       _error = 'Failed to load sessions';
     } finally {
       _isLoading = false;
@@ -136,10 +152,13 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final data = await ApiService.instance.getWithBody(
         ApiConstants.sessionStatus,
-        body: {if (_activeSession != null) 'sessionId': _activeSession!.id},
+        body: {
+          if (_activeSession != null) 'sessionId': _activeSession!.id,
+        },
       );
       if (data is Map && data['session'] != null) {
-        final session = SessionModel.fromJson(data['session'] as Map<String, dynamic>);
+        final session =
+            SessionModel.fromJson(data['session'] as Map<String, dynamic>);
         _activeSession = session;
         if (!session.isPaused) {
           _startTimer();
@@ -150,25 +169,35 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
         await _persistToCache();
         notifyListeners();
-      } else if (_activeSession != null) {
-        _activeSession = null;
-        _frozenDuration = null;
-        _sessionTimer?.cancel();
-        _sessionTimer = null;
-        await _persistToCache();
-        notifyListeners();
+      } else {
+        if (_activeSession != null) {
+          _activeSession = null;
+          _frozenDuration = null;
+          _sessionTimer?.cancel();
+          _sessionTimer = null;
+          await _persistToCache();
+          notifyListeners();
+        }
       }
     } catch (_) {}
   }
 
-  Future<SessionModel?> startSession(String projectId, {String? projectTitle}) async {
+  // ── Session control ─────────────────────────────────────────────────────────
+
+  /// Guards:
+  /// 1. If an active session already exists locally, return it — no API call.
+  /// 2. If a start call is already in flight, do nothing (prevents duplicate sessions).
+  Future<SessionModel?> startSession(String projectId,
+      {String? projectTitle}) async {
     if (_activeSession != null) return _activeSession;
     if (_isStarting) return null;
     _isStarting = true;
 
     try {
-      final data =
-          await ApiService.instance.post(ApiConstants.createSession, body: {'projectId': projectId});
+      final data = await ApiService.instance.post(
+        ApiConstants.createSession,
+        body: {'projectId': projectId},
+      );
 
       final map = data as Map<String, dynamic>?;
       SessionModel session;
@@ -176,7 +205,9 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
         session = SessionModel.fromJson(map);
       } else {
         session = SessionModel(
-          id: map?['insertedId']?.toString() ?? map?['_id']?.toString() ?? '',
+          id: map?['insertedId']?.toString() ??
+              map?['_id']?.toString() ??
+              '',
           projectId: projectId,
           startTime: DateTime.now(),
         );
@@ -201,7 +232,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _error = e.message;
       notifyListeners();
       return null;
-    } catch (_) {
+    } catch (e) {
       _error = 'Failed to start session';
       notifyListeners();
       return null;
@@ -244,7 +275,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     await NotificationService.instance.cancelAllNotifications();
 
     try {
-      await ApiService.instance.post(ApiConstants.stopSession, body: {'sessionId': stoppingSession.id});
+      await ApiService.instance.post(
+        ApiConstants.stopSession,
+        body: {'sessionId': stoppingSession.id},
+      );
     } on ApiException catch (e) {
       _error = e.message;
       notifyListeners();
@@ -259,14 +293,19 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     _frozenDuration = _activeSession!.duration;
     final pausedAt = DateTime.now();
 
-    _activeSession = _activeSession!.copyWith(isPaused: true, pausedAt: pausedAt);
+    _activeSession = _activeSession!.copyWith(
+      isPaused: true,
+      pausedAt: pausedAt,
+    );
     _sessionTimer?.cancel();
     _sessionTimer = null;
     notifyListeners();
 
     try {
-      final data =
-          await ApiService.instance.post(ApiConstants.pauseSession, body: {'sessionId': _activeSession!.id});
+      final data = await ApiService.instance.post(
+        ApiConstants.pauseSession,
+        body: {'sessionId': _activeSession!.id},
+      );
       if (data != null && data is Map) {
         final updated = SessionModel.fromJson(data as Map<String, dynamic>);
         _activeSession = updated;
@@ -275,6 +314,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
       }
     } on ApiException catch (_) {
+      // Keep local paused state to ensure timer actually pauses even if backend
+      // endpoint shape differs.
       await _persistToCache();
       notifyListeners();
     } catch (_) {}
@@ -286,7 +327,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     final additionalPausedMs = _activeSession!.pausedAt != null
         ? DateTime.now().difference(_activeSession!.pausedAt!).inMilliseconds
         : 0;
-    final newPausedDurationMs = _activeSession!.pausedDurationMs + additionalPausedMs;
+    final newPausedDurationMs =
+        _activeSession!.pausedDurationMs + additionalPausedMs;
 
     _activeSession = SessionModel(
       id: _activeSession!.id,
@@ -302,8 +344,10 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      final data =
-          await ApiService.instance.post(ApiConstants.startSession, body: {'sessionId': _activeSession!.id});
+      final data = await ApiService.instance.post(
+        ApiConstants.startSession,
+        body: {'sessionId': _activeSession!.id},
+      );
       if (data != null && data is Map) {
         final updated = SessionModel.fromJson(data as Map<String, dynamic>);
         _activeSession = updated;
@@ -311,10 +355,13 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
       }
     } on ApiException catch (_) {
+      // Keep local resumed state to preserve UX even if backend response fails.
       await _persistToCache();
       notifyListeners();
     } catch (_) {}
   }
+
+  // ── Task linking ────────────────────────────────────────────────────────────
 
   Future<bool> addTaskToSession(String taskId, {String? sessionId}) async {
     final sid = sessionId ?? _activeSession?.id;
@@ -335,6 +382,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
           body: {'taskId': taskId, 'sessionId': sid},
         );
       } on ApiException {
+        // Legacy backends may only accept taskId.
         await ApiService.instance.post(
           ApiConstants.addTaskToSession,
           body: {'taskId': taskId},
@@ -347,7 +395,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _error = e.message;
       notifyListeners();
       return false;
-    } catch (_) {
+    } catch (e) {
       _error = 'Failed to link task';
       notifyListeners();
       return false;
@@ -384,16 +432,28 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _error = e.message;
       notifyListeners();
       return false;
-    } catch (_) {
+    } catch (e) {
       _error = 'Failed to unlink task';
       notifyListeners();
       return false;
     }
   }
 
+  Future<bool> setTaskChecked({
+    required String sessionId,
+    required String taskId,
+    required bool isChecked,
+  }) async {
+    if (isChecked) {
+      return addTaskToSession(taskId, sessionId: sessionId);
+    }
+    return removeTaskFromSession(taskId, sessionId: sessionId);
+  }
+
   Future<bool> deleteSession(String sessionId) async {
     try {
-      await ApiService.instance.delete(ApiConstants.deleteSession, body: {'id': sessionId});
+      await ApiService.instance
+          .delete(ApiConstants.deleteSession, body: {'id': sessionId});
       _sessions.removeWhere((s) => s.id == sessionId);
       if (_activeSession?.id == sessionId) {
         _activeSession = null;
@@ -408,12 +468,14 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _error = e.message;
       notifyListeners();
       return false;
-    } catch (_) {
+    } catch (e) {
       _error = 'Failed to delete session';
       notifyListeners();
       return false;
     }
   }
+
+  // ── Timer ───────────────────────────────────────────────────────────────────
 
   void _startTimer() {
     _sessionTimer?.cancel();
@@ -429,6 +491,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
     });
   }
+
+  // ── Computed views ──────────────────────────────────────────────────────────
 
   List<SessionModel> get completedSessions {
     final list = _sessions.where((s) => !s.isActive).toList();
@@ -447,7 +511,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   Map<DateTime, Duration> get dailyActivity {
     final map = <DateTime, Duration>{};
     for (final s in completedSessions) {
-      final day = DateTime(s.startTime.year, s.startTime.month, s.startTime.day);
+      final day =
+          DateTime(s.startTime.year, s.startTime.month, s.startTime.day);
       map[day] = (map[day] ?? Duration.zero) + s.duration;
     }
     return map;
@@ -458,7 +523,7 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  void reconcileWithProjectIds(Set<String> projectIds) {
+  Future<void> reconcileWithProjectIds(Set<String> projectIds) async {
     if (projectIds.isEmpty) {
       _sessions = [];
       _activeSession = null;
@@ -466,20 +531,21 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _frozenDuration = null;
       _sessionTimer?.cancel();
       _sessionTimer = null;
-      _persistToCache();
+      await _persistToCache();
       notifyListeners();
       return;
     }
 
     _sessions = _sessions.where((s) => projectIds.contains(s.projectId)).toList();
-    if (_activeSession != null && !projectIds.contains(_activeSession!.projectId)) {
+    if (_activeSession != null &&
+        !projectIds.contains(_activeSession!.projectId)) {
       _activeSession = null;
       _activeProjectTitle = null;
       _frozenDuration = null;
       _sessionTimer?.cancel();
       _sessionTimer = null;
     }
-    _persistToCache();
+    await _persistToCache();
     notifyListeners();
   }
 
@@ -538,7 +604,8 @@ class SessionProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       } catch (_) {}
     }
-    _activeProjectTitle = prefs.getString('$_activeProjectTitleCachePrefix$userId');
+    _activeProjectTitle =
+        prefs.getString('$_activeProjectTitleCachePrefix$userId');
   }
 
   Future<String?> _resolveAccountKey() async {
