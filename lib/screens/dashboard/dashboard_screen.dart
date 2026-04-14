@@ -23,13 +23,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadData() async {
-    final projectsProv = context.read<ProjectProvider>();
-    final sessionsProv = context.read<SessionProvider>();
-    await projectsProv.fetchProjects();
-    await sessionsProv.fetchSessions();
-    sessionsProv.reconcileWithProjectIds(
-      projectsProv.projects.map((p) => p.id).toSet(),
-    );
+    await Future.wait([
+      context.read<ProjectProvider>().fetchProjects(),
+      context.read<SessionProvider>().fetchSessions(),
+    ]);
   }
 
   String _fmtDuration(Duration d) {
