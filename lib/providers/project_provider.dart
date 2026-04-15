@@ -1,4 +1,3 @@
-// lib/providers/project_provider.dart
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -86,13 +85,6 @@ class ProjectProvider extends ChangeNotifier {
   }) async {
     final info = await AuthService.instance.getUserInfo();
     final userId = info['userId'] ?? '';
-    final fallbackProject = ProjectModel(
-      id: 'local_${DateTime.now().millisecondsSinceEpoch}',
-      title: title,
-      description: description,
-      userId: userId,
-      createdAt: DateTime.now(),
-    );
 
     try {
       final data = await ApiService.instance.post(
@@ -121,17 +113,12 @@ class ProjectProvider extends ChangeNotifier {
       return project;
     } on ApiException catch (e) {
       _error = e.message;
-      // Allow optional-description and offline flows by saving locally.
-      _projects.insert(0, fallbackProject);
-      await _persistToCache();
       notifyListeners();
-      return fallbackProject;
+      return null;
     } catch (_) {
-      // Allow optional-description and offline flows by saving locally.
-      _projects.insert(0, fallbackProject);
-      await _persistToCache();
+      _error = 'Failed to create project. Please try again.';
       notifyListeners();
-      return fallbackProject;
+      return null;
     }
   }
 
@@ -349,16 +336,24 @@ class ProjectProvider extends ChangeNotifier {
     await _persistToCache();
     notifyListeners();
 
+    // Local-only optimistic notes can be removed without backend calls.
+    if (noteId.startsWith('temp_') || noteId.startsWith('local_')) {
+      return true;
+    }
+
     try {
       try {
         await ApiService.instance
             .delete(ApiConstants.deleteNote, body: {'id': noteId});
       } on ApiException {
-        // Compatibility for backends expecting a different payload shape.
-        await ApiService.instance.delete(
-          ApiConstants.deleteNote,
-          body: {'noteId': noteId, '_id': noteId},
-        );
+        try {
+          await ApiService.instance
+              .delete(ApiConstants.deleteNote, body: {'noteId': noteId});
+        } on ApiException {
+          // Compatibility fallback for servers that use POST delete semantics.
+          await ApiService.instance
+              .post(ApiConstants.deleteNote, body: {'id': noteId});
+        }
       }
       return true;
     } on ApiException catch (e) {
