@@ -1,4 +1,3 @@
-// lib/providers/auth_provider.dart
 import 'package:flutter/foundation.dart';
 import 'package:jwt_decoder/jwt_decoder.dart';
 import '../models/user_model.dart';
@@ -110,7 +109,7 @@ class AuthProvider extends ChangeNotifier {
       } else {
         _status = AuthStatus.unauthenticated;
       }
-      _errorMessage = e.message;
+      _errorMessage = _friendlyAuthMessage(e);
       notifyListeners();
       return false;
     } catch (e) {
@@ -143,7 +142,7 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return true;
     } on ApiException catch (e) {
-      _errorMessage = e.message;
+      _errorMessage = _friendlyAuthMessage(e);
       notifyListeners();
       return false;
     } catch (e) {
@@ -233,6 +232,24 @@ class AuthProvider extends ChangeNotifier {
   void setUnverified() {
     _status = AuthStatus.unverified;
     notifyListeners();
+  }
+
+  String _friendlyAuthMessage(ApiException e) {
+    final lower = e.message.toLowerCase();
+    if (e.statusCode == 401 ||
+        lower.contains('invalid credentials') ||
+        lower.contains('invalid email') ||
+        lower.contains('invalid password') ||
+        lower.contains('incorrect')) {
+      return 'Incorrect email or password';
+    }
+    if (lower.contains('not found') && lower.contains('user')) {
+      return 'Incorrect email or password';
+    }
+    if (lower.contains('already exists') || lower.contains('email already')) {
+      return 'Email already exists';
+    }
+    return e.message;
   }
 
   String _friendlyError(Object error, {required String fallback}) {

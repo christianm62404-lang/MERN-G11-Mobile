@@ -1,12 +1,38 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 
 class ApiConstants {
-  // Web (flutter run -d chrome) → localhost
-  // Android emulator           → 10.0.2.2:5050
-  // iPhone / physical device   → Mac's LAN IP:5050
-  static String get baseUrl => kIsWeb
-      ? 'http://localhost:5050/api'
-      : 'http://10.37.32.207:5050/api';
+  /// Optional override for every platform:
+  /// flutter run --dart-define=API_BASE_URL=http://192.168.1.10:5050
+  ///
+  /// Do NOT include `/api` in API_BASE_URL; this class appends it.
+  static const String _apiBaseOverride = String.fromEnvironment('API_BASE_URL');
+
+  static String get baseUrl {
+    if (_apiBaseOverride.trim().isNotEmpty) {
+      final trimmed = _apiBaseOverride.trim();
+      final normalized = trimmed.endsWith('/')
+          ? trimmed.substring(0, trimmed.length - 1)
+          : trimmed;
+      return normalized.endsWith('/api') ? normalized : '$normalized/api';
+    }
+
+    if (kIsWeb) {
+      // Chrome/web: backend on local machine.
+      return 'http://localhost:5050/api';
+    }
+
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        // Android emulator maps host machine localhost to 10.0.2.2
+        return 'http://10.0.2.2:5050/api';
+      case TargetPlatform.iOS:
+        // iOS simulator can use localhost directly.
+        return 'http://localhost:5050/api';
+      default:
+        // Desktop/dev fallback.
+        return 'http://localhost:5050/api';
+    }
+  }
 
   static const String createUser             = '/users/create';
   static const String loginUser              = '/users/login';
