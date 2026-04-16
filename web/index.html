@@ -86,6 +86,78 @@
       to { transform: rotate(360deg); }
     }
   </style>
+
+  <!-- Prevent Flutter engine from locking zoom (accessibility fix) -->
+  <script>
+    (function () {
+      function sanitize(val) {
+        return val
+          .replace(/user-scalable\s*=\s*no/gi, 'user-scalable=yes')
+          .replace(/maximum-scale\s*=\s*1\b/gi, 'maximum-scale=5');
+      }
+
+      // Keep a reference to the real setAttribute before patching
+      var _origSetAttr = Element.prototype.setAttribute;
+
+      function fixViewport(el) {
+        if (!el || el.tagName !== 'META' || el.getAttribute('name') !== 'viewport') return;
+        var cur = el.getAttribute('content') || '';
+        if (/user-scalable\s*=\s*no/i.test(cur) || /maximum-scale\s*=\s*1\b/i.test(cur)) {
+          _origSetAttr.call(el, 'content', sanitize(cur));
+        }
+      }
+
+      // 1. Patch HTMLMetaElement.prototype.content setter
+      var _origDesc = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, 'content');
+      if (_origDesc && _origDesc.set) {
+        Object.defineProperty(HTMLMetaElement.prototype, 'content', {
+          get: _origDesc.get,
+          set: function (val) {
+            if (this.getAttribute('name') === 'viewport' && typeof val === 'string') {
+              val = sanitize(val);
+            }
+            _origDesc.set.call(this, val);
+          },
+          configurable: true,
+        });
+      }
+
+      // 2. Patch Element.prototype.setAttribute
+      Element.prototype.setAttribute = function (name, value) {
+        if (this.tagName === 'META' && typeof value === 'string') {
+          if (name === 'content' && this.getAttribute('name') === 'viewport') {
+            value = sanitize(value);
+          }
+        }
+        _origSetAttr.call(this, name, value);
+        // If 'name' was just set to 'viewport', fix any already-bad content
+        if (this.tagName === 'META' && name === 'name' && value === 'viewport') {
+          fixViewport(this);
+        }
+      };
+
+      // 3. MutationObserver as final safety net
+      var observer = new MutationObserver(function (mutations) {
+        for (var i = 0; i < mutations.length; i++) {
+          var m = mutations[i];
+          if (m.type === 'attributes') {
+            fixViewport(m.target);
+          } else if (m.type === 'childList') {
+            for (var j = 0; j < m.addedNodes.length; j++) {
+              fixViewport(m.addedNodes[j]);
+            }
+          }
+        }
+      });
+
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['content', 'name'],
+      });
+    })();
+  </script>
 </head>
 <body>
   <div id="loading-shell" role="status" aria-live="polite">
@@ -96,13 +168,13 @@
 
   <script>
     window.addEventListener('flutter-first-frame', function () {
-      const shell = document.getElementById('loading-shell');
+      var shell = document.getElementById('loading-shell');
       if (shell) shell.remove();
     });
 
     // Fallback safety in case first-frame event is delayed/missed.
     setTimeout(function () {
-      const shell = document.getElementById('loading-shell');
+      var shell = document.getElementById('loading-shell');
       if (shell) shell.remove();
     }, 10000);
   </script>

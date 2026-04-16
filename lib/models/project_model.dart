@@ -14,13 +14,17 @@ class ProjectModel {
   });
 
   factory ProjectModel.fromJson(Map<String, dynamic> json) {
+    // Support new schema (createdAt) and old frontend schema (startDate)
+    final rawDate = json['createdAt'] ?? json['startDate'];
+
     return ProjectModel(
-      id: json['_id'] ?? json['id'] ?? '',
-      title: json['title'] ?? '',
-      description: json['description'] ?? '',
-      userId: json['userId'] ?? json['id'] ?? '',
-      createdAt: json['createdAt'] != null
-          ? DateTime.tryParse(json['createdAt']) ?? DateTime.now()
+      id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
+      // Support both 'title' (direct endpoints) and 'name' (queries endpoint)
+      title: json['title']?.toString() ?? json['name']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
+      createdAt: rawDate != null
+          ? DateTime.tryParse(rawDate.toString()) ?? DateTime.now()
           : DateTime.now(),
     );
   }
@@ -30,7 +34,7 @@ class ProjectModel {
       '_id': id,
       'title': title,
       'description': description,
-      'id': userId,
+      'userId': userId,
       'createdAt': createdAt.toIso8601String(),
     };
   }
