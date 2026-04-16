@@ -26,18 +26,12 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   Future<void> _loadData() async {
-    final projectsProv = context.read<ProjectProvider>();
-    final sessionsProv = context.read<SessionProvider>();
-    await projectsProv.fetchProjects();
-    await sessionsProv.fetchSessions();
-    await sessionsProv.reconcileWithProjectIds(
-      projectsProv.projects.map((p) => p.id).toSet(),
-    );
+    await context.read<ProjectProvider>().fetchProjects();
+    await context.read<SessionProvider>().fetchSessions();
   }
 
   void _showStartDialog() {
     final sessions = context.read<SessionProvider>();
-    // Don't open if still loading data or already tracking a session
     if (sessions.isLoading || sessions.hasActiveSession) return;
 
     final projects = context.read<ProjectProvider>().projects;
@@ -62,6 +56,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
     final projects = context.watch<ProjectProvider>();
 
     String projectTitle(String projectId) {
+      if (projectId.isEmpty) return 'Unknown Project';
       try {
         return projects.projects.firstWhere((p) => p.id == projectId).title;
       } catch (_) {
@@ -69,20 +64,21 @@ class _SessionsScreenState extends State<SessionsScreen> {
       }
     }
 
-    // Only allow starting when not already loading and not already tracking
     final canStart = !sessions.hasActiveSession && !sessions.isLoading;
 
     final completed = sessions.completedSessions;
+    // Time-based stats only count properly stopped sessions (endTime set).
+    final stopped = completed.where((s) => s.endTime != null).toList();
     final now = DateTime.now();
     final monthStart = DateTime(now.year, now.month, 1);
     final monthSessions =
-        completed.where((s) => s.startTime.isAfter(monthStart)).toList();
+        stopped.where((s) => s.startTime.isAfter(monthStart)).toList();
     final monthDuration = monthSessions.fold<Duration>(
         Duration.zero, (a, s) => a + s.duration);
     final monthHours = monthDuration.inMinutes / 60.0;
-    final avgSeconds = completed.isNotEmpty
-        ? completed.fold<int>(0, (a, s) => a + s.duration.inSeconds) ~/
-            completed.length
+    final avgSeconds = stopped.isNotEmpty
+        ? stopped.fold<int>(0, (a, s) => a + s.duration.inSeconds) ~/
+            stopped.length
         : 0;
     final avgDuration = Duration(seconds: avgSeconds);
 
@@ -103,12 +99,40 @@ class _SessionsScreenState extends State<SessionsScreen> {
               onRefresh: _loadData,
               child: CustomScrollView(
                 slivers: [
+                  // Error banner — visible if the fetch failed
+                  if (sessions.error != null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .errorContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'Sessions error: ${sessions.error}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
                   if (sessions.hasActiveSession)
                     SliverToBoxAdapter(
                       child: _ActiveSessionBanner(
                         session: sessions.activeSession!,
                         projectTitle: sessions.activeProjectTitle ??
-                            projectTitle(sessions.activeSession!.projectId),
+                            projectTitle(
+                                sessions.activeSession!.projectId),
                       ),
                     ),
 
@@ -190,7 +214,8 @@ class _SessionsScreenState extends State<SessionsScreen> {
                                   queryParameters: {'projectTitle': title},
                                 ).toString(),
                               ),
-                              onDelete: () => sessions.deleteSession(s.id),
+                              onDelete: () =>
+                                  sessions.deleteSession(s.id),
                             ),
                           );
                         },
@@ -268,7 +293,8 @@ class _ActiveSessionBanner extends StatelessWidget {
                       child: Text(
                         projectTitle,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withOpacity(0.65),
+                          color:
+                              theme.colorScheme.onSurface.withOpacity(0.65),
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -314,7 +340,8 @@ class _ActiveSessionBanner extends StatelessWidget {
               _BannerIconButton(
                 icon: Icons.stop,
                 color: AppTheme.errorColor,
-                onTap: () => context.read<SessionProvider>().stopSession(),
+                onTap: () =>
+                    context.read<SessionProvider>().stopSession(),
               ),
             ],
           ),
@@ -497,7 +524,8 @@ class _StatCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w800,
-                  color: highlight ? Colors.white : theme.colorScheme.primary,
+                  color:
+                      highlight ? Colors.white : theme.colorScheme.primary,
                 ),
               ),
               if (unit != null) ...[
@@ -543,7 +571,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
       final projectId = widget.session.projectId;
       Future.wait([
         context.read<ProjectProvider>().fetchTasks(projectId),
-        context.read<ProjectProvider>()
+        context
+            .read<ProjectProvider>()
             .fetchNotes(widget.session.id, 'session'),
       ]);
     });
@@ -560,8 +589,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           ElevatedButton(
-            style:
-                ElevatedButton.styleFrom(backgroundColor: AppTheme.errorColor),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.errorColor),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('End Session'),
           ),
@@ -664,7 +693,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                         label: Text(isPaused ? 'Resume' : 'Pause'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.warningColor,
-                          side: const BorderSide(color: AppTheme.warningColor),
+                          side: const BorderSide(
+                              color: AppTheme.warningColor),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 20, vertical: 12),
                         ),
@@ -672,7 +702,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                       const SizedBox(width: 12),
                       ElevatedButton.icon(
                         onPressed: _confirmStop,
-                        icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                        icon: const Icon(Icons.stop_circle_outlined,
+                            size: 18),
                         label: const Text('End Session'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.errorColor,
@@ -688,24 +719,20 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
             ),
             const Divider(height: 1),
 
+            // ── Tasks ──────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Row(
-                children: [
-                  Text('TASKS',
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.2,
-                        color:
-                            theme.colorScheme.onSurface.withOpacity(0.5),
-                      )),
-                ],
-              ),
+              child: Text('TASKS',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                    color: theme.colorScheme.onSurface.withOpacity(0.5),
+                  )),
             ),
             if (allProjectTasks.isEmpty)
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
                 child: Text(
                   'No tasks for this project yet.',
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -714,25 +741,33 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
                 ),
               )
             else
-              ...allProjectTasks.map((t) => CheckboxListTile(
-                    value: session.taskIds.contains(t.id),
-                    onChanged: (checked) async {
-                      if (checked == null) return;
-                      await context.read<SessionProvider>().setTaskChecked(
-                            sessionId: session.id,
-                            taskId: t.id,
-                            isChecked: checked,
-                          );
-                    },
-                    title: Text(t.name),
-                    subtitle:
-                        t.description.isNotEmpty ? Text(t.description) : null,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 16),
-                    controlAffinity: ListTileControlAffinity.leading,
-                  )),
+              ...allProjectTasks.map((t) {
+                final isLinked = session.taskIds.contains(t.id);
+                return CheckboxListTile(
+                  value: isLinked,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text(t.name,
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.w600)),
+                  subtitle: t.description.isNotEmpty
+                      ? Text(t.description)
+                      : null,
+                  onChanged: (val) async {
+                    if (val == null) return;
+                    final sp = context.read<SessionProvider>();
+                    if (val) {
+                      await sp.addTaskToSession(t.id);
+                    } else {
+                      await sp.removeTaskFromSession(t.id);
+                    }
+                  },
+                );
+              }),
             const Divider(height: 24),
 
+            // ── Notes ──────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Row(
@@ -759,8 +794,8 @@ class _FocusModeScreenState extends State<_FocusModeScreen> {
             ),
             if (notes.isEmpty)
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
                 child: Text(
                   'No notes yet — jot something down.',
                   style: theme.textTheme.bodySmall?.copyWith(
@@ -807,12 +842,14 @@ class _StatusBadge extends StatelessWidget {
               width: 6,
               height: 6,
               margin: const EdgeInsets.only(right: 6),
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              decoration:
+                  BoxDecoration(color: color, shape: BoxShape.circle),
             ),
           if (isPaused)
             const Padding(
               padding: EdgeInsets.only(right: 4),
-              child: Icon(Icons.pause, size: 12, color: AppTheme.warningColor),
+              child: Icon(Icons.pause,
+                  size: 12, color: AppTheme.warningColor),
             ),
           Text(
             isPaused ? 'PAUSED' : 'ACTIVE',
@@ -889,43 +926,9 @@ class _LargeTimerState extends State<_LargeTimer> {
 
     return Text(text,
         style: const TextStyle(
-            fontSize: 52, fontWeight: FontWeight.w800, letterSpacing: -1.5));
-  }
-}
-
-// ── Task card ────────────────────────────────────────────────────────────────
-
-class _TaskCard extends StatelessWidget {
-  final TaskModel task;
-  const _TaskCard({required this.task});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(10),
-        border:
-            Border.all(color: theme.colorScheme.onSurface.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(task.name,
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(fontWeight: FontWeight.w600)),
-          if (task.description.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(task.description,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.5))),
-          ],
-        ],
-      ),
-    );
+            fontSize: 52,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -1.5));
   }
 }
 
@@ -945,14 +948,15 @@ class _NoteCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(10),
-        border:
-            Border.all(color: theme.colorScheme.onSurface.withOpacity(0.08)),
+        border: Border.all(
+            color: theme.colorScheme.onSurface.withOpacity(0.08)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
-              child: Text(note.content, style: theme.textTheme.bodyMedium)),
+              child:
+                  Text(note.content, style: theme.textTheme.bodyMedium)),
           IconButton(
             icon: const Icon(Icons.delete_outline,
                 size: 16, color: AppTheme.errorColor),
@@ -1021,10 +1025,14 @@ class _SessionTile extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(session.formattedDuration,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: theme.colorScheme.primary)),
+                  Text(
+                    session.endTime != null
+                        ? session.formattedDuration
+                        : '—',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.primary),
+                  ),
                   IconButton(
                     icon: const Icon(Icons.delete_outline,
                         size: 18, color: AppTheme.errorColor),
@@ -1072,12 +1080,14 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
             const SizedBox(height: 4),
             Text('Select a project to track time for',
                 style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withOpacity(0.6))),
+                    color:
+                        theme.colorScheme.onSurface.withOpacity(0.6))),
             const SizedBox(height: 16),
             ...widget.projects.map((p) => RadioListTile<String>(
                   title: Text(p.title),
-                  subtitle:
-                      p.description.isNotEmpty ? Text(p.description) : null,
+                  subtitle: p.description.isNotEmpty
+                      ? Text(p.description)
+                      : null,
                   value: p.id,
                   groupValue: _selectedId,
                   onChanged: (v) => setState(() => _selectedId = v),
@@ -1090,13 +1100,12 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
                 onPressed: _selectedId == null || _loading
                     ? null
                     : () async {
-                        // Double-tap guard
                         if (_loading) return;
                         setState(() => _loading = true);
 
-                        final sessionProv = context.read<SessionProvider>();
+                        final sessionProv =
+                            context.read<SessionProvider>();
 
-                        // Race-condition guard: session may have started elsewhere
                         if (sessionProv.hasActiveSession) {
                           if (context.mounted) Navigator.pop(context);
                           return;
@@ -1114,7 +1123,8 @@ class _StartSessionSheetState extends State<_StartSessionSheet> {
                         } else {
                           setState(() => _loading = false);
                           final err = sessionProv.error;
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(SnackBar(
                             content:
                                 Text(err ?? 'Failed to start session'),
                             backgroundColor: AppTheme.errorColor,

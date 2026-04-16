@@ -15,10 +15,13 @@ class NotificationService {
   static final NotificationService instance = NotificationService._();
   NotificationService._();
 
-  final FirebaseMessaging _fcm = FirebaseMessaging.instance;
+  // Initialized lazily inside initialize() — FirebaseMessaging.instance throws
+  // on web before Firebase JS SDK is ready, so never touch it at field level.
+  FirebaseMessaging? _fcm;
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
+  // Notification channel for Android
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
     'timetrack_channel',
     'TimeTrack Notifications',
@@ -27,36 +30,51 @@ class NotificationService {
     playSound: true,
   );
 
+  // Callback for when a notification is tapped
   Function(Map<String, dynamic>)? onNotificationTap;
 
   Future<void> initialize() async {
+    // Push notifications are not supported on web — skip silently.
     if (kIsWeb) return;
 
+    _fcm = FirebaseMessaging.instance;
+
+    // Register background handler
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // Request permission
     await _requestPermission();
+
+    // Set up local notifications
     await _setupLocalNotifications();
+
+    // Get and save FCM token
     await _saveFcmToken();
 
-    _fcm.onTokenRefresh.listen((token) async {
+    // Listen to token refresh
+    _fcm!.onTokenRefresh.listen((token) async {
       await AuthService.instance.saveFcmToken(token);
     });
 
+    // Handle foreground messages
     FirebaseMessaging.onMessage.listen((message) {
       _showLocalNotification(message);
     });
 
+    // Handle notification tap when app is in background/terminated
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       _handleNotificationTap(message.data);
     });
 
-    final initialMessage = await _fcm.getInitialMessage();
+    // Check if app was opened via notification
+    final initialMessage = await _fcm!.getInitialMessage();
     if (initialMessage != null) {
       _handleNotificationTap(initialMessage.data);
     }
   }
 
   Future<void> _requestPermission() async {
-    await _fcm.requestPermission(
+    await _fcm!.requestPermission(
       alert: true,
       badge: true,
       sound: true,
@@ -71,10 +89,12 @@ class NotificationService {
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
+
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
     );
+
     await _localNotifications.initialize(
       initSettings,
       onDidReceiveNotificationResponse: (details) {
@@ -86,6 +106,8 @@ class NotificationService {
         }
       },
     );
+
+    // Create Android notification channel
     await _localNotifications
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
@@ -93,7 +115,7 @@ class NotificationService {
   }
 
   Future<void> _saveFcmToken() async {
-    final token = await _fcm.getToken();
+    final token = await _fcm?.getToken();
     if (token != null) {
       await AuthService.instance.saveFcmToken(token);
       debugPrint('FCM Token: $token');
@@ -103,7 +125,9 @@ class NotificationService {
   Future<void> _showLocalNotification(RemoteMessage message) async {
     final notification = message.notification;
     final android = message.notification?.android;
+
     if (notification == null) return;
+
     await _localNotifications.show(
       notification.hashCode,
       notification.title ?? 'TimeTrack',
@@ -132,20 +156,27 @@ class NotificationService {
     onNotificationTap?.call(data);
   }
 
-  Future<String?> getToken() async => await _fcm.getToken();
+  Future<String?> getToken() async {
+    if (kIsWeb || _fcm == null) return null;
+    return await _fcm!.getToken();
+  }
 
   Future<void> subscribeToTopic(String topic) async {
-    await _fcm.subscribeToTopic(topic);
+    if (kIsWeb || _fcm == null) return;
+    await _fcm!.subscribeToTopic(topic);
   }
 
   Future<void> unsubscribeFromTopic(String topic) async {
-    await _fcm.unsubscribeFromTopic(topic);
+    if (kIsWeb || _fcm == null) return;
+    await _fcm!.unsubscribeFromTopic(topic);
   }
 
+  /// Show a local notification for session reminders
   Future<void> showSessionReminder({
     required String projectTitle,
     required String duration,
   }) async {
+    if (kIsWeb) return;
     await _localNotifications.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
       'Session in Progress',
@@ -172,6 +203,7 @@ class NotificationService {
   }
 
   Future<void> cancelAllNotifications() async {
+    if (kIsWeb) return;
     await _localNotifications.cancelAll();
   }
 }

@@ -37,6 +37,7 @@ class SessionModel {
       return net.isNegative ? Duration.zero : net;
     }
 
+    // Actively running
     final total = DateTime.now().difference(startTime);
     final net = total - pausedOffset;
     return net.isNegative ? Duration.zero : net;
@@ -56,84 +57,54 @@ class SessionModel {
   }
 
   factory SessionModel.fromJson(Map<String, dynamic> json) {
-    final rawTasks = json['taskIds'] ?? json['tasks'] ?? const [];
-    final tasks = (rawTasks as List).map<String>((e) {
+    // Backend uses 'createdAt' as the session start time, not 'startTime'
+    final startTime = json['createdAt'] != null
+        ? DateTime.tryParse(json['createdAt'].toString())?.toLocal() ??
+            DateTime.now()
+        : json['startTime'] != null
+            ? DateTime.tryParse(json['startTime'].toString())?.toLocal() ??
+                DateTime.now()
+            : DateTime.now();
+
+    final endTime = json['endTime'] != null
+        ? DateTime.tryParse(json['endTime'].toString())?.toLocal()
+        : null;
+
+    // Backend stores totalTime in seconds (pre-computed net duration).
+    // Derive pausedDurationMs so the duration getter returns totalTime for
+    // completed sessions, and computes live elapsed time for active ones.
+    final totalTimeSec = json['totalTime'] is int
+        ? json['totalTime'] as int
+        : int.tryParse(json['totalTime']?.toString() ?? '') ?? 0;
+
+    int pausedDurationMs = 0;
+    if (endTime != null && totalTimeSec > 0) {
+      final wallMs = endTime.difference(startTime).inMilliseconds;
+      final netMs = totalTimeSec * 1000;
+      pausedDurationMs = (wallMs - netMs).clamp(0, wallMs);
+    }
+
+    // Tasks: null, list of id strings, or list of objects with 'taskId'
+    final rawTasks = json['taskIds'] ?? json['tasks'];
+    final tasksList = rawTasks is List ? rawTasks : <dynamic>[];
+    final tasks = tasksList.map<String>((e) {
       if (e is String) return e;
       if (e is Map) return (e['taskId'] ?? e['_id'] ?? '').toString();
       return e.toString();
     }).where((s) => s.isNotEmpty).toList();
 
-    final pausedDurRaw = json['pausedDurationMs'];
-    final pausedDurationMs = pausedDurRaw is int
-        ? pausedDurRaw
-        : int.tryParse(pausedDurRaw?.toString() ?? '') ?? 0;
-
     return SessionModel(
       id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
       projectId: json['projectId']?.toString() ?? '',
-      startTime: _parseBackendDate(json['startTime']) ?? DateTime.now(),
-      endTime: _parseBackendDate(json['endTime']),
-      pausedAt: _parseBackendDate(json['pausedAt']),
+      startTime: startTime,
+      endTime: endTime,
+      pausedAt: json['pausedAt'] != null
+          ? DateTime.tryParse(json['pausedAt'].toString())?.toLocal()
+          : null,
       pausedDurationMs: pausedDurationMs,
       taskIds: tasks,
+      // Backend uses 'paused' key; also accept 'isPaused' for forward compat
       isPaused: json['isPaused'] == true || json['paused'] == true,
-    );
-  }
-
-  static DateTime? _parseBackendDate(dynamic raw) {
-    if (raw == null) return null;
-    final str = raw.toString().trim();
-    if (str.isEmpty) return null;
-
-    final parsed = DateTime.tryParse(str);
-    if (parsed == null) return null;
-
-    final hasZone = str.endsWith('Z') || RegExp(r'[+-]\d{2}:\d{2}$').hasMatch(str);
-    final utc = hasZone
-        ? parsed.toUtc()
-        : DateTime.utc(
-            parsed.year,
-            parsed.month,
-            parsed.day,
-            parsed.hour,
-            parsed.minute,
-            parsed.second,
-            parsed.millisecond,
-            parsed.microsecond,
-          );
-    return _utcToEasternWallClock(utc);
-  }
-
-  static DateTime _utcToEasternWallClock(DateTime utc) {
-    final year = utc.year;
-
-    DateTime nthWeekdayOfMonthUtc(int month, int weekday, int occurrence) {
-      final first = DateTime.utc(year, month, 1);
-      final delta = (weekday - first.weekday + 7) % 7;
-      final day = 1 + delta + (occurrence - 1) * 7;
-      return DateTime.utc(year, month, day);
-    }
-
-    // US Eastern DST boundaries (UTC instants):
-    // start: 2nd Sunday in March at 07:00 UTC
-    // end:   1st Sunday in November at 06:00 UTC
-    final dstStartDate = nthWeekdayOfMonthUtc(DateTime.march, DateTime.sunday, 2);
-    final dstEndDate = nthWeekdayOfMonthUtc(DateTime.november, DateTime.sunday, 1);
-    final dstStartUtc = DateTime.utc(year, 3, dstStartDate.day, 7);
-    final dstEndUtc = DateTime.utc(year, 11, dstEndDate.day, 6);
-
-    final isDst = !utc.isBefore(dstStartUtc) && utc.isBefore(dstEndUtc);
-    final easternUtc = utc.add(Duration(hours: isDst ? -4 : -5));
-
-    return DateTime(
-      easternUtc.year,
-      easternUtc.month,
-      easternUtc.day,
-      easternUtc.hour,
-      easternUtc.minute,
-      easternUtc.second,
-      easternUtc.millisecond,
-      easternUtc.microsecond,
     );
   }
 
