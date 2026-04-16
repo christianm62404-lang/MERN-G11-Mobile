@@ -37,6 +37,7 @@ class SessionModel {
       return net.isNegative ? Duration.zero : net;
     }
 
+    // Actively running
     final total = DateTime.now().difference(startTime);
     final net = total - pausedOffset;
     return net.isNegative ? Duration.zero : net;
@@ -56,36 +57,53 @@ class SessionModel {
   }
 
   factory SessionModel.fromJson(Map<String, dynamic> json) {
-    final rawTasks = json['taskIds'] ?? json['tasks'] ?? const [];
-    final tasks = (rawTasks as List).map<String>((e) {
+    // Backend uses 'createdAt' as the session start time, not 'startTime'
+    final startTime = json['createdAt'] != null
+        ? DateTime.tryParse(json['createdAt'].toString())?.toLocal() ??
+            DateTime.now()
+        : json['startTime'] != null
+            ? DateTime.tryParse(json['startTime'].toString())?.toLocal() ??
+                DateTime.now()
+            : DateTime.now();
+
+    final endTime = json['endTime'] != null
+        ? DateTime.tryParse(json['endTime'].toString())?.toLocal()
+        : null;
+
+    // Backend stores totalTime in seconds (pre-computed net duration).
+    // Derive pausedDurationMs so the duration getter returns totalTime for
+    // completed sessions, and computes live elapsed time for active ones.
+    final totalTimeSec = json['totalTime'] is int
+        ? json['totalTime'] as int
+        : int.tryParse(json['totalTime']?.toString() ?? '') ?? 0;
+
+    int pausedDurationMs = 0;
+    if (endTime != null && totalTimeSec > 0) {
+      final wallMs = endTime.difference(startTime).inMilliseconds;
+      final netMs = totalTimeSec * 1000;
+      pausedDurationMs = (wallMs - netMs).clamp(0, wallMs);
+    }
+
+    // Tasks: null, list of id strings, or list of objects with 'taskId'
+    final rawTasks = json['taskIds'] ?? json['tasks'];
+    final tasksList = rawTasks is List ? rawTasks : <dynamic>[];
+    final tasks = tasksList.map<String>((e) {
       if (e is String) return e;
       if (e is Map) return (e['taskId'] ?? e['_id'] ?? '').toString();
       return e.toString();
     }).where((s) => s.isNotEmpty).toList();
 
-    final pausedDurRaw = json['pausedDurationMs'];
-    final pausedDurationMs = pausedDurRaw is int
-        ? pausedDurRaw
-        : int.tryParse(pausedDurRaw?.toString() ?? '') ?? 0;
-
-    // Support new schema (startTime) and old frontend schema (currentTime)
-    final rawStart = json['startTime'] ?? json['currentTime'];
-
     return SessionModel(
       id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
       projectId: json['projectId']?.toString() ?? '',
-      startTime: rawStart != null
-          ? (DateTime.tryParse(rawStart.toString())?.toLocal()) ?? DateTime.now()
-          : DateTime.now(),
-      endTime: json['endTime'] != null
-          ? DateTime.tryParse(json['endTime'].toString())?.toLocal()
-          : null,
+      startTime: startTime,
+      endTime: endTime,
       pausedAt: json['pausedAt'] != null
           ? DateTime.tryParse(json['pausedAt'].toString())?.toLocal()
           : null,
       pausedDurationMs: pausedDurationMs,
       taskIds: tasks,
-      // Support new schema (isPaused) and old frontend schema (paused)
+      // Backend uses 'paused' key; also accept 'isPaused' for forward compat
       isPaused: json['isPaused'] == true || json['paused'] == true,
     );
   }

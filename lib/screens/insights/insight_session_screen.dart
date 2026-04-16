@@ -290,8 +290,10 @@ class _MetricRow extends StatelessWidget {
     final dur = session.duration;
     final h = dur.inHours;
     final m = dur.inMinutes.remainder(60);
-    final durationStr =
-        h > 0 ? '${h}h ${m}m' : m > 0 ? '${m}m' : '${dur.inSeconds}s';
+    // Show "—" for orphaned sessions that were never properly stopped.
+    final durationStr = session.endTime == null
+        ? '—'
+        : (h > 0 ? '${h}h ${m}m' : m > 0 ? '${m}m' : '${dur.inSeconds}s');
 
     final startStr = DateFormat('h:mm a').format(session.startTime);
     final endStr = session.endTime != null

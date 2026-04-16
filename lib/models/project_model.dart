@@ -14,12 +14,11 @@ class ProjectModel {
   });
 
   factory ProjectModel.fromJson(Map<String, dynamic> json) {
-    // Support new schema (createdAt) and old frontend schema (startDate)
+    // Backend may store 'startDate' (old schema) or 'createdAt' (new schema)
     final rawDate = json['createdAt'] ?? json['startDate'];
 
     return ProjectModel(
       id: json['_id']?.toString() ?? json['id']?.toString() ?? '',
-      // Support both 'title' (direct endpoints) and 'name' (queries endpoint)
       title: json['title']?.toString() ?? json['name']?.toString() ?? '',
       description: json['description']?.toString() ?? '',
       userId: json['userId']?.toString() ?? '',
