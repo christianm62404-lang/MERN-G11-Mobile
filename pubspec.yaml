@@ -17,7 +17,8 @@ dependencies:
   provider: ^6.1.2
 
   # Secure storage for JWT
-  flutter_secure_storage: ^9.2.2
+  # Change in pubspec.yaml
+  flutter_secure_storage: ^10.0.0   # was ^9.2.2 — v10 is WASM-compatible
 
   # Push Notifications
   firebase_core: ^3.4.0
@@ -30,14 +31,13 @@ dependencies:
   # UI / Charts
   cupertino_icons: ^1.0.8
   fl_chart: ^0.68.0
-  intl: ^0.19.0
+  intl: ^0.20.0
   shimmer: ^3.0.0
 
   # Utils
   shared_preferences: ^2.3.2
   jwt_decoder: ^2.0.1
   google_fonts: ^6.2.1
-
 
 dev_dependencies:
   flutter_test:
