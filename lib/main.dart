@@ -20,6 +20,7 @@ void main() async {
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
     ]);
+
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
@@ -29,6 +30,7 @@ void main() async {
     ));
   }
 
+  // Firebase and push notifications are only supported on mobile (Android/iOS).
   if (!kIsWeb) {
     await Firebase.initializeApp();
     await NotificationService.instance.initialize();
@@ -56,6 +58,7 @@ class MernG11App extends StatelessWidget {
             context.read<SessionProvider>().stopAndClear();
             context.read<ProjectProvider>().clearData();
           };
+
           final router = AppRouter.createRouter(context);
           return MaterialApp.router(
             title: 'TimeTrack',
@@ -70,3 +73,4 @@ class MernG11App extends StatelessWidget {
     );
   }
 }
+
