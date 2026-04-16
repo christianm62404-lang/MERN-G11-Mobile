@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/app_button.dart';
 import '../../widgets/app_text_field.dart';
+import '../../widgets/app_logo.dart';
 import '../../utils/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -53,11 +54,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Container(
-                      width: 32, height: 32,
-                      decoration: BoxDecoration(color: AppTheme.primaryColor, borderRadius: BorderRadius.circular(8)),
-                      child: const Icon(Icons.access_time_rounded, size: 18, color: Colors.white),
-                    ),
+                    const AppLogo(size: 32),
                     const SizedBox(width: 10),
                     const Text('TimeTrack', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
                   ]),
